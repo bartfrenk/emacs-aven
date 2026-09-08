@@ -38,12 +38,17 @@
 (defun aven--ref-at-point ()
   "Task ref at point, or nil."
   (or (when-let* ((section (and (fboundp 'magit-current-section) (magit-current-section)))
-                   (_ (eq (oref section type) 'aven-task)))
+                  (_ (eq (oref section type) 'aven-task)))
         (oref section value))
       (and (boundp 'aven-task--ref) aven-task--ref)
       (let ((sym (thing-at-point 'symbol t)))
         (when (and sym (string-match-p (concat "\\`" aven--ref-pattern "\\'") sym))
           sym))))
+
+(defun aven/package-version ()
+  "Display the package version"
+  (interactive)
+  (message "0.1.0"))
 
 (defun aven--ref-on-line ()
   "Task ref at the start of the current line, as printed by `list'/`search'."
@@ -80,12 +85,16 @@
         (blocked   (plist-get task :blocked_by))
         (blocks    (plist-get task :blocks)))
     (delq nil
-          (list (cons "ref" (plist-get task :ref))
+          (list (cons "ref" (propertize (plist-get task :ref)
+                                         'font-lock-face 'aven-ref-face))
                 (cons "status" (plist-get task :status))
                 (unless (equal priority "none") (cons "priority" priority))
-                (cons "project" (plist-get task :project))
-                (when labels (cons "labels" (string-join labels ",")))
-                (unless (string-empty-p due) (cons "due" due))
+                (cons "project" (propertize (plist-get task :project)
+                                             'font-lock-face 'aven-project-face))
+                (when labels (cons "labels" (propertize (string-join labels ",")
+                                                          'font-lock-face 'aven-label-face)))
+                (unless (string-empty-p due) (cons "due" (propertize due
+                                                                      'font-lock-face 'aven-due-face)))
                 (unless (string-empty-p available) (cons "available" available))
                 (when (and blocked (> blocked 0)) (cons "blocked by" (number-to-string blocked)))
                 (when (and blocks (> blocks 0)) (cons "blocks" (number-to-string blocks)))
@@ -99,7 +108,7 @@
   "Raw description text of REF, or the empty string on failure."
   (with-temp-buffer
     (if (zerop (call-process aven--executable nil t nil
-                              "text" "get" ref "description" "--raw"))
+                             "text" "get" ref "description" "--raw"))
         (string-trim (buffer-string))
       "")))
 
@@ -122,13 +131,13 @@
          (description (aven--task-description ref)))
     (let ((inhibit-read-only t))
       (erase-buffer)
-      (insert (propertize (plist-get task :title) 'face 'bold) "\n\n")
+      (insert (propertize (plist-get task :title) 'font-lock-face 'bold) "\n\n")
       (dolist (prop (aven--task-properties task))
-        (insert (propertize (format "%s:" (car prop)) 'face 'font-lock-comment-face)
+        (insert (propertize (format "%s:" (car prop)) 'font-lock-face 'font-lock-comment-face)
                 " " (cdr prop) "\n"))
       (insert "\n")
       (if (string-empty-p description)
-          (insert (propertize "No description." 'face 'shadow) "\n")
+          (insert (propertize "No description." 'font-lock-face 'shadow) "\n")
         (insert description "\n")))
     (goto-char (point-min))))
 
@@ -187,7 +196,7 @@
         (erase-buffer)
         (aven-output-mode)
         (insert (format "$ aven %s\n\n"
-                         (string-join (mapcar #'shell-quote-argument args) " ")))
+                        (string-join (mapcar #'shell-quote-argument args) " ")))
         (apply #'call-process aven--executable nil t nil args)
         (goto-char (point-min))))
     (when (get-buffer aven-status-buffer-name)
@@ -337,9 +346,9 @@
          (sha aven-description--sha256)
          (result (with-temp-buffer
                    (let ((exit-code (call-process aven--executable nil t nil
-                                                   "text" "set" ref field
-                                                   "--file" file
-                                                   "--if-sha256" sha)))
+                                                  "text" "set" ref field
+                                                  "--file" file
+                                                  "--if-sha256" sha)))
                      (cons exit-code (buffer-string))))))
     (if (zerop (car result))
         (progn
@@ -397,8 +406,8 @@ Either way, the Aven status buffer is left in view."
          (file (make-temp-file (format "aven-%s-description-" ref) nil ".md"))
          (result (with-temp-buffer
                    (let ((exit-code (call-process aven--executable nil t nil
-                                                   "text" "get" ref "description"
-                                                   "--output" file)))
+                                                  "text" "get" ref "description"
+                                                  "--output" file)))
                      (cons exit-code (buffer-string))))))
     (unless (zerop (car result))
       (delete-file file)
@@ -473,7 +482,7 @@ Either way, the Aven status buffer is left in view."
   "Run `aven list' with ARGS and return the parsed tasks."
   (with-temp-buffer
     (let ((exit-code (apply #'call-process aven--executable nil t nil
-                             "list" (append args (list "--json")))))
+                            "list" (append args (list "--json")))))
       (if (zerop exit-code)
           (let ((json-array-type 'list)
                 (json-object-type 'plist)
@@ -489,27 +498,27 @@ Either way, the Aven status buffer is left in view."
         (due     (plist-get task :due_on))
         (title   (plist-get task :title)))
     (concat
-     (propertize ref 'face 'aven-ref-face)
+     (propertize ref 'font-lock-face 'aven-ref-face)
      " "
      (unless (string-empty-p project)
-       (concat (propertize project 'face 'aven-project-face) " "))
+       (concat (propertize project 'font-lock-face 'aven-project-face) " "))
      (when labels
-       (concat (propertize (string-join labels ",") 'face 'aven-label-face) " "))
+       (concat (propertize (string-join labels ",") 'font-lock-face 'aven-label-face) " "))
      title
      (unless (string-empty-p due)
-       (concat " " (propertize (format "[%s]" due) 'face 'aven-due-face))))))
+       (concat " " (propertize (format "[%s]" due) 'font-lock-face 'aven-due-face))))))
 
 (defun aven--insert-task-drawer (task)
   "Insert TASK's fields as properties, then its description, as the
 body of its (folded) section."
   (insert "\n")
   (dolist (prop (aven--task-properties task))
-    (insert "    " (propertize (format "%s:" (car prop)) 'face 'font-lock-comment-face)
+    (insert "    " (propertize (format "%s:" (car prop)) 'font-lock-face 'font-lock-comment-face)
             " " (cdr prop) "\n"))
   (insert "\n")
   (let ((description (aven--task-description (plist-get task :ref))))
     (if (string-empty-p description)
-        (insert "    " (propertize "No description." 'face 'shadow) "\n")
+        (insert "    " (propertize "No description." 'font-lock-face 'shadow) "\n")
       (dolist (line (split-string description "\n"))
         (insert "    " line "\n"))))
   (insert "\n"))
@@ -575,12 +584,12 @@ When HIDE is non-nil, the section starts folded."
       (let ((inhibit-read-only t))
         (erase-buffer)
         (when workspace
-          (insert (propertize (format "Workspace: %s" workspace) 'face 'bold) "\n\n"))
+          (insert (propertize (format "Workspace: %s" workspace) 'font-lock-face 'bold) "\n\n"))
         (magit-insert-section (aven-status)
           (dolist (group groups)
             (aven--insert-task-section (car group) nil (cdr group))))
         (when (eq (point-min) (point-max))
-          (insert (propertize "No tasks.\n" 'face 'shadow)))
+          (insert (propertize "No tasks.\n" 'font-lock-face 'shadow)))
         (let ((magit-section-cache-visibility nil))
           (magit-section-show magit-root-section)))
       (goto-char (point-min)))
