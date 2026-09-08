@@ -453,14 +453,20 @@ Either way, the Aven status buffer is left in view."
   "Interface to the Aven task manager."
   :group 'tools)
 
-(defcustom aven-status-fields '(priority due labels)
-  "Task fields shown as columns in the Aven status buffer, in order.
-The task ref and title are always shown, ref first and title last;
-this controls the columns shown between them."
-  :type '(repeat (choice (const :tag "Priority" priority)
-                          (const :tag "Due date" due)
-                          (const :tag "Labels" labels)
-                          (const :tag "Project" project)))
+(defface aven-ref-face '((t :foreground "gray50"))
+  "Face for a task ref."
+  :group 'aven)
+
+(defface aven-project-face '((t :foreground "turquoise"))
+  "Face for a task's project."
+  :group 'aven)
+
+(defface aven-label-face '((t :foreground "orange"))
+  "Face for a task's labels."
+  :group 'aven)
+
+(defface aven-due-face '((t :foreground "gray50"))
+  "Face for a task's due date."
   :group 'aven)
 
 (defun aven--list-json (&rest args)
@@ -475,50 +481,23 @@ this controls the columns shown between them."
             (json-read-from-string (buffer-string)))
         (error "aven: %s" (string-trim (buffer-string)))))))
 
-(defun aven--task-priority-face (priority)
-  (pcase priority
-    ("urgent" 'error)
-    ("high"   'warning)
-    ("low"    'shadow)
-    ("none"   'shadow)
-    (_        nil)))
-
-(defun aven--field-value (task field)
-  "String value of FIELD in TASK, or nil if it has none worth showing."
-  (pcase field
-    ('priority (let ((v (plist-get task :priority))) (unless (equal v "none") v)))
-    ('due      (let ((v (plist-get task :due_on))) (unless (string-empty-p v) v)))
-    ('labels   (let ((v (plist-get task :labels))) (when v (string-join v ","))))
-    ('project  (plist-get task :project))))
-
-(defun aven--field-face (field value)
-  (pcase field
-    ('priority (aven--task-priority-face value))
-    ('due      'warning)
-    ('labels   'shadow)
-    ('project  'shadow)))
-
-(defun aven--column-widths (tasks)
-  "Max display width of each field in `aven-status-fields' across TASKS."
-  (mapcar (lambda (field)
-            (cons field
-                  (apply #'max 0 (mapcar (lambda (task)
-                                            (length (or (aven--field-value task field) "")))
-                                          tasks))))
-          aven-status-fields))
-
-(defun aven--task-row-text (task ref-width widths)
-  "Text of TASK's table row: ref, the configured fields, then title.
-REF-WIDTH and WIDTHS (an alist as returned by `aven--column-widths')
-align the ref and field columns consistently across all sections."
-  (concat
-   (propertize (string-pad (plist-get task :ref) ref-width) 'face 'font-lock-constant-face)
-   (mapconcat (lambda (field)
-                (let ((value (aven--field-value task field)))
-                  (concat "  " (propertize (string-pad (or value "") (alist-get field widths))
-                                            'face (aven--field-face field value)))))
-              aven-status-fields "")
-   "  " (plist-get task :title)))
+(defun aven--task-line-text (task)
+  "Text of TASK's line: ref, project, labels, description, and due date."
+  (let ((ref     (plist-get task :ref))
+        (project (plist-get task :project))
+        (labels  (plist-get task :labels))
+        (due     (plist-get task :due_on))
+        (title   (plist-get task :title)))
+    (concat
+     (propertize ref 'face 'aven-ref-face)
+     " "
+     (unless (string-empty-p project)
+       (concat (propertize project 'face 'aven-project-face) " "))
+     (when labels
+       (concat (propertize (string-join labels ",") 'face 'aven-label-face) " "))
+     title
+     (unless (string-empty-p due)
+       (concat " " (propertize (format "[%s]" due) 'face 'aven-due-face))))))
 
 (defun aven--insert-task-drawer (task)
   "Insert TASK's fields as properties, then its description, as the
@@ -535,23 +514,37 @@ body of its (folded) section."
         (insert "    " line "\n"))))
   (insert "\n"))
 
-(defun aven--insert-task-line (task ref-width widths)
-  "Insert TASK as a folded section: the heading is its table row,
+(defun aven--insert-task-line (task)
+  "Insert TASK as a folded section: the heading is its formatted line,
 the body is its properties drawer and description."
   (magit-insert-section (aven-task (plist-get task :ref) t)
-    (magit-insert-heading (aven--task-row-text task ref-width widths))
+    (magit-insert-heading (aven--task-line-text task))
     (aven--insert-task-drawer task)))
 
-(defun aven--insert-task-section (heading hide tasks ref-width widths)
-  "Insert a section titled HEADING listing TASKS as a table.
-When HIDE is non-nil, the section starts folded. REF-WIDTH and WIDTHS
-align columns consistently across all sections in the buffer."
+(defun aven--insert-task-section (heading hide tasks)
+  "Insert a section titled HEADING listing TASKS.
+When HIDE is non-nil, the section starts folded."
   (when tasks
     (magit-insert-section (aven-tasks heading hide)
       (magit-insert-heading (format "%s (%d)" heading (length tasks)))
       (dolist (task tasks)
-        (aven--insert-task-line task ref-width widths))
+        (aven--insert-task-line task))
       (insert "\n"))))
+
+(defun aven--current-workspace ()
+  "Description of the active Aven workspace, or nil if it can't be found."
+  (with-temp-buffer
+    (when (zerop (call-process aven--executable nil t nil "doctor" "--json"))
+      (let* ((json-array-type 'list)
+             (json-object-type 'plist)
+             (json-key-type 'keyword)
+             (sections (plist-get (json-read-from-string (buffer-string)) :sections)))
+        (catch 'found
+          (dolist (section sections)
+            (when (equal (plist-get section :code) "workspace")
+              (dolist (row (plist-get section :rows))
+                (when (equal (plist-get row :code) "workspace.active")
+                  (throw 'found (plist-get row :value)))))))))))
 
 (define-derived-mode aven-status-mode magit-section-mode "Aven-Status"
   "Major mode for the Aven status buffer.")
@@ -571,22 +564,21 @@ align columns consistently across all sections in the buffer."
   "Rebuild the Aven status buffer."
   (interactive)
   (let* ((buf (get-buffer-create aven-status-buffer-name))
+         (workspace (aven--current-workspace))
          (groups (list (cons "Active"  (aven--list-json "--status=active"))
                        (cons "Todo"    (aven--list-json "--status=todo"))
                        (cons "Backlog" (aven--list-json "--status=backlog"))
-                       (cons "Inbox"   (aven--list-json "--status=inbox"))))
-         (all-tasks (apply #'append (mapcar #'cdr groups)))
-         (widths (aven--column-widths all-tasks))
-         (ref-width (apply #'max 0 (mapcar (lambda (task) (length (plist-get task :ref)))
-                                            all-tasks))))
+                       (cons "Inbox"   (aven--list-json "--status=inbox")))))
     (with-current-buffer buf
       (unless (derived-mode-p 'aven-status-mode)
         (aven-status-mode))
       (let ((inhibit-read-only t))
         (erase-buffer)
+        (when workspace
+          (insert (propertize (format "Workspace: %s" workspace) 'face 'bold) "\n\n"))
         (magit-insert-section (aven-status)
           (dolist (group groups)
-            (aven--insert-task-section (car group) nil (cdr group) ref-width widths)))
+            (aven--insert-task-section (car group) nil (cdr group))))
         (when (eq (point-min) (point-max))
           (insert (propertize "No tasks.\n" 'face 'shadow)))
         (let ((magit-section-cache-visibility nil))
