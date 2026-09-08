@@ -21,6 +21,12 @@
 
 (require 'transient)
 (require 'magit-section)
+;; `evil-define-key' is a macro; the byte-compiler must see its real
+;; definition at compile time or it silently compiles the calls below
+;; into runtime calls to a nonexistent function `evil-define-key'.
+;; This is compile-time only, so evil is still not a runtime dependency.
+(eval-when-compile
+  (require 'evil))
 
 (defvar aven--executable "aven")
 
