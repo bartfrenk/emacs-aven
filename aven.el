@@ -1,3 +1,24 @@
+;;; aven.el --- Transient interface to the Aven CLI task manager -*- lexical-binding: t; -*-
+
+;; Author: Bart Frenk <bart.frenk@gmail.com>
+;; Package-Requires: ((emacs "27.1") (transient "0.4") (magit-section "3.0"))
+;; Keywords: tools
+
+;;; Commentary:
+
+;; Aven is a local-first task manager (the `aven' CLI).  This package
+;; wraps it in a magit-like transient interface, plus a status buffer
+;; and a per-task buffer, both built on `magit-section'.
+;;
+;; Evil bindings are set up automatically when `evil' is loaded, but
+;; are not required: without evil, everything here is still reachable
+;; interactively (M-x aven/status, aven/dispatch, ...).
+;;
+;; This package does not bind any global keys itself; callers should
+;; bind `aven/status' or `aven/dispatch' to whatever key they like.
+
+;;; Code:
+
 (require 'transient)
 (require 'magit-section)
 
@@ -84,7 +105,8 @@
 (define-derived-mode aven-task-mode special-mode "Aven-Task"
   "Major mode for a buffer showing one Aven task's properties and description.")
 
-(evil-set-initial-state 'aven-task-mode 'motion)
+(with-eval-after-load 'evil
+  (evil-set-initial-state 'aven-task-mode 'motion))
 
 (defun aven-task-refresh ()
   "Rebuild this Aven task buffer from the current state of its task."
@@ -114,12 +136,13 @@
       (aven-task-refresh))
     (display-buffer buf)))
 
-(evil-define-key 'motion aven-task-mode-map
-  "g" #'aven-task-refresh
-  "e" #'aven/edit
-  "d" #'aven/edit-description
-  "n" #'aven/note
-  "?" #'aven/dispatch)
+(with-eval-after-load 'evil
+  (evil-define-key 'motion aven-task-mode-map
+    "g" #'aven-task-refresh
+    "e" #'aven/edit
+    "d" #'aven/edit-description
+    "n" #'aven/note
+    "?" #'aven/dispatch))
 
 (defvar aven-output-font-lock-keywords
   `(("^\\$ aven .*$" . font-lock-comment-face)
@@ -147,7 +170,8 @@
   "Major mode for displaying `aven' command output."
   (setq font-lock-defaults '(aven-output-font-lock-keywords)))
 
-(evil-set-initial-state 'aven-output-mode 'motion)
+(with-eval-after-load 'evil
+  (evil-set-initial-state 'aven-output-mode 'motion))
 
 (defun aven--call (buffer-name args)
   "Run aven with ARGS, a list of strings, and display the output in BUFFER-NAME."
@@ -180,8 +204,9 @@
       (user-error "No task ref on this line"))
     (aven--show-ref ref)))
 
-(evil-define-key 'motion aven-output-mode-map
-  (kbd "RET") #'aven-output-visit-task)
+(with-eval-after-load 'evil
+  (evil-define-key 'motion aven-output-mode-map
+    (kbd "RET") #'aven-output-visit-task))
 
 (transient-define-prefix aven/list ()
   "List Aven tasks."
@@ -525,7 +550,8 @@ align columns consistently across all sections in the buffer."
 (define-derived-mode aven-status-mode magit-section-mode "Aven-Status"
   "Major mode for the Aven status buffer.")
 
-(evil-set-initial-state 'aven-status-mode 'motion)
+(with-eval-after-load 'evil
+  (evil-set-initial-state 'aven-status-mode 'motion))
 
 (defun aven-status-visit-task-or-toggle ()
   "Show the task at point in a dedicated buffer, or toggle the section."
@@ -567,22 +593,19 @@ align columns consistently across all sections in the buffer."
   (interactive)
   (switch-to-buffer (aven-status-refresh)))
 
-(evil-define-key 'motion aven-status-mode-map
-  (kbd "RET") #'aven-status-visit-task-or-toggle
-  "g" #'aven-status-refresh
-  "l" #'aven/list
-  "s" #'aven/search
-  "w" #'aven/show
-  "c" #'aven/context
-  "a" #'aven/add
-  "e" #'aven/edit
-  "d" #'aven/edit-description
-  "n" #'aven/note
-  "?" #'aven/dispatch)
+(with-eval-after-load 'evil
+  (evil-define-key 'motion aven-status-mode-map
+    (kbd "RET") #'aven-status-visit-task-or-toggle
+    "g" #'aven-status-refresh
+    "l" #'aven/list
+    "s" #'aven/search
+    "w" #'aven/show
+    "c" #'aven/context
+    "a" #'aven/add
+    "e" #'aven/edit
+    "d" #'aven/edit-description
+    "n" #'aven/note
+    "?" #'aven/dispatch))
 
-(defun aven--register ()
-  (map! :leader
-        :desc "Aven"
-        "n g t" #'aven/status))
-
-(aven--register)
+(provide 'aven)
+;;; aven.el ends here
