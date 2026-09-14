@@ -142,14 +142,14 @@
     (goto-char (point-min))))
 
 (defun aven--show-ref (ref)
-  "Show REF in a dedicated Aven task buffer."
+  "Show REF in a dedicated Aven task buffer, with focus on its window."
   (let ((buf (get-buffer-create (format "*aven: %s*" ref))))
     (with-current-buffer buf
       (unless (derived-mode-p 'aven-task-mode)
         (aven-task-mode)
         (setq-local aven-task--ref ref))
       (aven-task-refresh))
-    (display-buffer buf)))
+    (pop-to-buffer buf)))
 
 (with-eval-after-load 'evil
   (evil-define-key 'motion aven-task-mode-map
