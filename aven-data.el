@@ -11,6 +11,7 @@
 
 ;;; Code:
 
+(require 'json)
 (require 'aven-core)
 
 (defun aven--task-json (ref)
