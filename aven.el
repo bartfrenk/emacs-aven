@@ -433,37 +433,45 @@ by calling FLAG-FN with its ref."
       (user-error "aven: no task at point"))
     (aven--run "edit" ref (funcall flag-fn ref))))
 
+(defun aven--task-field (ref field)
+  "REF's FIELD from `aven show', or nil if it is absent or empty."
+  (let ((value (plist-get (aven--task-json ref) field)))
+    (unless (or (null value) (and (stringp value) (string-empty-p value)))
+      value)))
+
 (defun aven/edit-title ()
   "Set a task's title."
   (interactive)
   (aven--edit-field
-   (lambda (_ref) (concat "--title=" (read-string "Title: ")))))
+   (lambda (ref)
+     (concat "--title=" (read-string "Title: " (aven--task-field ref :title))))))
 
 (defun aven/edit-status ()
   "Set a task's status."
   (interactive)
   (aven--edit-field
-   (lambda (_ref)
+   (lambda (ref)
      (concat "--status="
              (completing-read "Status: "
                                '("inbox" "backlog" "todo" "active" "done" "canceled")
-                               nil t)))))
+                               nil t (aven--task-field ref :status))))))
 
 (defun aven/edit-priority ()
   "Set a task's priority."
   (interactive)
   (aven--edit-field
-   (lambda (_ref)
+   (lambda (ref)
      (concat "--priority="
              (completing-read "Priority: "
                                '("none" "low" "medium" "high" "urgent")
-                               nil t)))))
+                               nil t (aven--task-field ref :priority))))))
 
 (defun aven/edit-project ()
   "Move a task to another project."
   (interactive)
   (aven--edit-field
-   (lambda (_ref) (concat "--project=" (read-string "Project: ")))))
+   (lambda (ref)
+     (concat "--project=" (read-string "Project: " (aven--task-field ref :project))))))
 
 (defun aven/edit-label-add ()
   "Add a label to a task."
@@ -481,7 +489,9 @@ by calling FLAG-FN with its ref."
   "Set a task's availability date."
   (interactive)
   (aven--edit-field
-   (lambda (_ref) (concat "--available-at=" (read-string "Available at: ")))))
+   (lambda (ref)
+     (concat "--available-at="
+             (read-string "Available at: " (aven--task-field ref :available_at))))))
 
 (defun aven/edit-available-at-clear ()
   "Clear a task's availability date."
@@ -492,7 +502,8 @@ by calling FLAG-FN with its ref."
   "Set a task's due date."
   (interactive)
   (aven--edit-field
-   (lambda (_ref) (concat "--due=" (read-string "Due: ")))))
+   (lambda (ref)
+     (concat "--due=" (read-string "Due: " (aven--task-field ref :due_on))))))
 
 (defun aven/edit-due-clear ()
   "Clear a task's due date."
