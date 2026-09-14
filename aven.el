@@ -439,6 +439,16 @@ by calling FLAG-FN with its ref."
     (unless (or (null value) (and (stringp value) (string-empty-p value)))
       value)))
 
+(defun aven--project-keys ()
+  "Keys of all existing projects in the active workspace."
+  (with-temp-buffer
+    (when (zerop (call-process aven--executable nil t nil "project" "list" "--json"))
+      (let ((json-array-type 'list)
+            (json-object-type 'plist)
+            (json-key-type 'keyword))
+        (mapcar (lambda (project) (plist-get project :key))
+                (json-read-from-string (buffer-string)))))))
+
 (defun aven/edit-title ()
   "Set a task's title."
   (interactive)
@@ -471,7 +481,9 @@ by calling FLAG-FN with its ref."
   (interactive)
   (aven--edit-field
    (lambda (ref)
-     (concat "--project=" (read-string "Project: " (aven--task-field ref :project))))))
+     (concat "--project="
+             (completing-read "Project: " (aven--project-keys) nil nil
+                               (aven--task-field ref :project))))))
 
 (defun aven/edit-label-add ()
   "Add a label to a task."
