@@ -124,11 +124,14 @@
   (evil-set-initial-state 'aven-task-mode 'motion))
 
 (defun aven-task-refresh ()
-  "Rebuild this Aven task buffer from the current state of its task."
+  "Rebuild this Aven task buffer from the current state of its task,
+keeping point on the same line and column when possible."
   (interactive)
   (let* ((ref aven-task--ref)
          (task (aven--task-json ref))
-         (description (aven--task-description ref)))
+         (description (aven--task-description ref))
+         (line (line-number-at-pos))
+         (column (current-column)))
     (let ((inhibit-read-only t))
       (erase-buffer)
       (insert (propertize (plist-get task :title) 'font-lock-face 'bold) "\n\n")
@@ -139,7 +142,9 @@
       (if (string-empty-p description)
           (insert (propertize "No description." 'font-lock-face 'shadow) "\n")
         (insert description "\n")))
-    (goto-char (point-min))))
+    (goto-char (point-min))
+    (forward-line (1- line))
+    (move-to-column column)))
 
 (defun aven--show-ref (ref)
   "Show REF in a dedicated Aven task buffer, with focus on its window."
@@ -695,8 +700,18 @@ When HIDE is non-nil, the section starts folded."
         (aven--show-ref (oref section value))
       (when section (magit-section-toggle section)))))
 
+(defun aven--section-for-ref (section ref)
+  "The `aven-task' section for REF within SECTION's subtree, or nil."
+  (if (and (eq (oref section type) 'aven-task) (equal (oref section value) ref))
+      section
+    (catch 'found
+      (dolist (child (oref section children))
+        (when-let* ((found (aven--section-for-ref child ref)))
+          (throw 'found found))))))
+
 (defun aven-status-refresh ()
-  "Rebuild the Aven status buffer."
+  "Rebuild the Aven status buffer, keeping point on the same task
+when possible."
   (interactive)
   (let* ((buf (get-buffer-create aven-status-buffer-name))
          (workspace (aven--current-workspace))
@@ -707,18 +722,20 @@ When HIDE is non-nil, the section starts folded."
     (with-current-buffer buf
       (unless (derived-mode-p 'aven-status-mode)
         (aven-status-mode))
-      (let ((inhibit-read-only t))
-        (erase-buffer)
-        (when workspace
-          (insert (propertize (format "Workspace: %s" workspace) 'font-lock-face 'bold) "\n\n"))
-        (magit-insert-section (aven-status)
-          (dolist (group groups)
-            (aven--insert-task-section (car group) nil (cdr group))))
-        (when (eq (point-min) (point-max))
-          (insert (propertize "No tasks.\n" 'font-lock-face 'shadow)))
-        (let ((magit-section-cache-visibility nil))
-          (magit-section-show magit-root-section)))
-      (goto-char (point-min)))
+      (let ((ref (aven--ref-at-point)))
+        (let ((inhibit-read-only t))
+          (erase-buffer)
+          (when workspace
+            (insert (propertize (format "Workspace: %s" workspace) 'font-lock-face 'bold) "\n\n"))
+          (magit-insert-section (aven-status)
+            (dolist (group groups)
+              (aven--insert-task-section (car group) nil (cdr group))))
+          (when (eq (point-min) (point-max))
+            (insert (propertize "No tasks.\n" 'font-lock-face 'shadow)))
+          (let ((magit-section-cache-visibility nil))
+            (magit-section-show magit-root-section)))
+        (let ((section (and ref (aven--section-for-ref magit-root-section ref))))
+          (goto-char (if section (oref section start) (point-min))))))
     buf))
 
 (defun aven/status ()
