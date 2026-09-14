@@ -526,7 +526,12 @@ buffer."
   "Remove a label from a task."
   (interactive)
   (aven--edit-field
-   (lambda (_ref) (concat "--remove-label=" (read-string "Remove label: ")))))
+   (lambda (ref)
+     (let ((labels (aven--task-field ref :labels)))
+       (unless labels
+         (user-error "aven: task has no labels to remove"))
+       (concat "--remove-label="
+               (completing-read "Remove label: " labels nil t))))))
 
 (defun aven/edit-available-at ()
   "Set a task's availability date."
