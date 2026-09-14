@@ -468,6 +468,13 @@ buffer."
         (mapcar (lambda (project) (plist-get project :key))
                 (json-read-from-string (buffer-string)))))))
 
+(defun aven--label-names ()
+  "Names of all existing labels in the active workspace."
+  (with-temp-buffer
+    (when (zerop (call-process aven--executable nil t nil "label" "list" "--json"))
+      (let ((json-array-type 'list))
+        (json-read-from-string (buffer-string))))))
+
 (defun aven/edit-title ()
   "Set a task's title."
   (interactive)
@@ -505,10 +512,15 @@ buffer."
                                (aven--task-field ref :project))))))
 
 (defun aven/edit-label-add ()
-  "Add a label to a task."
+  "Add a label to a task, creating it first if it doesn't exist yet."
   (interactive)
   (aven--edit-field
-   (lambda (_ref) (concat "--label=" (read-string "Add label: ")))))
+   (lambda (_ref)
+     (let* ((existing (aven--label-names))
+            (label (completing-read "Add label: " existing)))
+       (unless (member label existing)
+         (call-process aven--executable nil nil nil "label" "create" label))
+       (concat "--label=" label)))))
 
 (defun aven/edit-label-remove ()
   "Remove a label from a task."
