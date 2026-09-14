@@ -154,8 +154,7 @@
 (with-eval-after-load 'evil
   (evil-define-key 'motion aven-task-mode-map
     "g" #'aven-task-refresh
-    "e" #'aven/edit
-    "d" #'aven/edit-description
+    "e" #'aven/edit-field
     "n" #'aven/note
     "?" #'aven/dispatch))
 
@@ -400,9 +399,11 @@ Either way, the Aven status buffer is left in view."
     (remove-hook 'kill-buffer-hook #'aven-description--cleanup t)))
 
 (defun aven/edit-description (&optional ref)
-  "Open a buffer to edit REF's description, saved back via `aven text set'."
+  "Open a buffer to edit REF's description, saved back via `aven text set'.
+REF defaults to the task at point; errors if there is none."
   (interactive)
-  (let* ((ref (or ref (aven--read-ref "Edit description of: ")))
+  (let* ((ref (or ref (aven--ref-at-point)
+                  (user-error "aven: no task at point")))
          (file (make-temp-file (format "aven-%s-description-" ref) nil ".md"))
          (result (with-temp-buffer
                    (let ((exit-code (call-process aven--executable nil t nil
@@ -421,6 +422,107 @@ Either way, the Aven status buffer is left in view."
                   aven-description--sha256 hash)
       (aven-description-edit-mode 1)
       (message "aven: editing description of %s (C-c C-c to push, C-c C-k to discard)" ref))))
+
+;;; Quick field edits
+
+(defun aven--edit-field (flag-fn)
+  "Run `aven edit' on the task at point, applying the flag returned
+by calling FLAG-FN with its ref."
+  (let ((ref (aven--ref-at-point)))
+    (unless ref
+      (user-error "aven: no task at point"))
+    (aven--run "edit" ref (funcall flag-fn ref))))
+
+(defun aven/edit-title ()
+  "Set a task's title."
+  (interactive)
+  (aven--edit-field
+   (lambda (_ref) (concat "--title=" (read-string "Title: ")))))
+
+(defun aven/edit-status ()
+  "Set a task's status."
+  (interactive)
+  (aven--edit-field
+   (lambda (_ref)
+     (concat "--status="
+             (completing-read "Status: "
+                               '("inbox" "backlog" "todo" "active" "done" "canceled")
+                               nil t)))))
+
+(defun aven/edit-priority ()
+  "Set a task's priority."
+  (interactive)
+  (aven--edit-field
+   (lambda (_ref)
+     (concat "--priority="
+             (completing-read "Priority: "
+                               '("none" "low" "medium" "high" "urgent")
+                               nil t)))))
+
+(defun aven/edit-project ()
+  "Move a task to another project."
+  (interactive)
+  (aven--edit-field
+   (lambda (_ref) (concat "--project=" (read-string "Project: ")))))
+
+(defun aven/edit-label-add ()
+  "Add a label to a task."
+  (interactive)
+  (aven--edit-field
+   (lambda (_ref) (concat "--label=" (read-string "Add label: ")))))
+
+(defun aven/edit-label-remove ()
+  "Remove a label from a task."
+  (interactive)
+  (aven--edit-field
+   (lambda (_ref) (concat "--remove-label=" (read-string "Remove label: ")))))
+
+(defun aven/edit-available-at ()
+  "Set a task's availability date."
+  (interactive)
+  (aven--edit-field
+   (lambda (_ref) (concat "--available-at=" (read-string "Available at: ")))))
+
+(defun aven/edit-available-at-clear ()
+  "Clear a task's availability date."
+  (interactive)
+  (aven--edit-field (lambda (_ref) "--clear-available-at")))
+
+(defun aven/edit-due ()
+  "Set a task's due date."
+  (interactive)
+  (aven--edit-field
+   (lambda (_ref) (concat "--due=" (read-string "Due: ")))))
+
+(defun aven/edit-due-clear ()
+  "Clear a task's due date."
+  (interactive)
+  (aven--edit-field (lambda (_ref) "--clear-due")))
+
+(defun aven/edit-epic-toggle ()
+  "Toggle whether a task is an epic."
+  (interactive)
+  (aven--edit-field
+   (lambda (ref)
+     (if (eq (plist-get (aven--task-json ref) :is_epic) t)
+         "--epic=off"
+       "--epic=on"))))
+
+(transient-define-prefix aven/edit-field ()
+  "Edit a single field of an Aven task."
+  ["Edit field"
+   ("t" "Title"            aven/edit-title)
+   ("d" "Description"      aven/edit-description)
+   ("s" "Status"           aven/edit-status)
+   ("i" "Priority"         aven/edit-priority)
+   ("p" "Project"          aven/edit-project)
+   ("l" "Add label"        aven/edit-label-add)
+   ("L" "Remove label"     aven/edit-label-remove)
+   ("a" "Available at"     aven/edit-available-at)
+   ("A" "Clear available"  aven/edit-available-at-clear)
+   ("u" "Due"              aven/edit-due)
+   ("U" "Clear due"        aven/edit-due-clear)
+   ("e" "Toggle epic"      aven/edit-epic-toggle)])
 
 (defun aven/note ()
   "Append a note to a task."
@@ -450,6 +552,7 @@ Either way, the Aven status buffer is left in view."
    ["Task"
     ("a" "Add"         aven/add)
     ("e" "Edit"        aven/edit)
+    ("f" "Edit field"  aven/edit-field)
     ("d" "Description" aven/edit-description)
     ("n" "Note"        aven/note)]
    ["Workspace"
@@ -609,8 +712,7 @@ When HIDE is non-nil, the section starts folded."
     "w" #'aven/show
     "c" #'aven/context
     "a" #'aven/add
-    "e" #'aven/edit
-    "d" #'aven/edit-description
+    "e" #'aven/edit-field
     "n" #'aven/note
     "?" #'aven/dispatch))
 
