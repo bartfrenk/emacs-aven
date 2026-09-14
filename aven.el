@@ -192,16 +192,21 @@ keeping point on the same line and column when possible."
 (with-eval-after-load 'evil
   (evil-set-initial-state 'aven-output-mode 'motion))
 
-(defun aven--call (buffer-name args)
-  "Run aven with ARGS, a list of strings, and display the output in BUFFER-NAME."
-  (let ((buf (get-buffer-create buffer-name)))
+(defun aven--call (buffer-name args &optional no-display)
+  "Run aven with ARGS, a list of strings, and display the output in
+BUFFER-NAME. When NO-DISPLAY is non-nil, the buffer is updated and
+open Aven buffers are refreshed as usual, but the buffer is only
+shown if the command failed; on success a summary goes to the echo
+area instead."
+  (let ((buf (get-buffer-create buffer-name))
+        exit-code)
     (with-current-buffer buf
       (let ((inhibit-read-only t))
         (erase-buffer)
         (aven-output-mode)
         (insert (format "$ aven %s\n\n"
                         (string-join (mapcar #'shell-quote-argument args) " ")))
-        (apply #'call-process aven--executable nil t nil args)
+        (setq exit-code (apply #'call-process aven--executable nil t nil args))
         (goto-char (point-min))))
     (when (get-buffer aven-status-buffer-name)
       (aven-status-refresh))
@@ -209,11 +214,19 @@ keeping point on the same line and column when possible."
       (with-current-buffer task-buf
         (when (derived-mode-p 'aven-task-mode)
           (aven-task-refresh))))
-    (display-buffer buf)))
+    (if (and no-display (eql exit-code 0))
+        (message "aven %s" (string-join args " "))
+      (display-buffer buf))))
 
 (defun aven--run (&rest args)
   "Run aven with ARGS and display the output in `*aven*'."
   (aven--call "*aven*" args))
+
+(defun aven--run-quietly (&rest args)
+  "Run aven with ARGS without popping up `*aven*' on success; open
+Aven buffers are still refreshed, and the output buffer is shown if
+the command fails."
+  (aven--call "*aven*" args t))
 
 (defun aven-output-visit-task ()
   "Show the task on the current line in a dedicated buffer."
@@ -321,7 +334,7 @@ keeping point on the same line and column when possible."
 (defun aven--edit-task (&optional args)
   (interactive (list (transient-args 'aven/edit)))
   (let ((ref (aven--read-ref "Edit task: ")))
-    (apply #'aven--run "edit" (append args (list ref)))))
+    (apply #'aven--run-quietly "edit" (append args (list ref)))))
 
 (defun aven--parse-sha256 (output)
   "First sha256=HASH field in OUTPUT, or nil."
@@ -432,11 +445,12 @@ REF defaults to the task at point; errors if there is none."
 
 (defun aven--edit-field (flag-fn)
   "Run `aven edit' on the task at point, applying the flag returned
-by calling FLAG-FN with its ref."
+by calling FLAG-FN with its ref, without popping up the Aven output
+buffer."
   (let ((ref (aven--ref-at-point)))
     (unless ref
       (user-error "aven: no task at point"))
-    (aven--run "edit" ref (funcall flag-fn ref))))
+    (aven--run-quietly "edit" ref (funcall flag-fn ref))))
 
 (defun aven--task-field (ref field)
   "REF's FIELD from `aven show', or nil if it is absent or empty."
