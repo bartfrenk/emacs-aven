@@ -280,7 +280,9 @@ Aven only soft-deletes it: `aven restore' recovers it."
     ("L" "List"    aven/list)
     ("s" "Search"  aven/search)
     ("w" "Show"    aven/show)
-    ("c" "Context" aven/context)]
+    ("c" "Context" aven/context)
+    ("f" "Filter"  aven/status-filter
+     :if (lambda () (derived-mode-p 'aven-status-mode)))]
    ["Task"
     ("a" "Add"         aven/add)
     ("e" "Edit field"  aven/edit-field)
