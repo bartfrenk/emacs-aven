@@ -138,8 +138,10 @@ way the dispatch menu hides the status filter.
    this way look the same as ones created by =workmux add=, so =workmux list=
    and =workmux merge= still work on them.
 4. *Record the link on the task* as metadata:
-   - =agent-branch= :: the branch name; this is the authoritative link
-   - =agent-worktree= :: the absolute worktree path
+   - =agent-directory= :: where the agent runs: the absolute worktree path,
+     or the project's directory without a worktree
+   - =agent-branch= :: the branch name; only set for a worktree, so its
+     presence is what marks a task as working in a worktree
    - =agent-base= :: the branch the worktree was created from, which
      Finish merges back into
    - =agent-session= :: the agent-shell session id, written once the session
@@ -192,13 +194,29 @@ string), since the wording will need tuning.
 
 ** Without a worktree
 
-Turning =-w= off runs the agent in the project root, with no branch, no merge
-and no worktree metadata. This is for non-code projects (=gtd=, notes) and
-small fixes. In this mode the agent keeps the skill's normal rules and marks
-the task =done= itself, because there is no merge step afterwards.
+The =-w= switch runs the agent in the project's directory, with no branch and
+no merge; the task gets only =agent-directory= (and =agent-session=). This is
+for non-code projects (=gtd=, notes) and small fixes. In this mode the agent
+keeps the skill's normal rules: its opening message tells it to mark the task
+=done= itself once the work is complete (and committed, in a git repository),
+because there is no merge step afterwards. It doesn't set the review flag.
 
-The default for =-w= is a per-project setting (=aven-agent-worktree-projects=,
-or simply "on when the project root is a git repo").
+=-w= is on by default when the project's directory is not a git repository,
+or when the project is listed in =aven-agent-direct-projects=. A project that
+turns out not to be a git repository never gets a worktree, whatever =-w=
+says.
+
+Several tasks can work in the same directory this way, so emacs-aven finds a
+task's agent-shell by the task it was started for, not by its directory.
+Starting a second agent in a directory where another task's agent is running
+asks for confirmation first.
+
+Without a worktree:
+- Finish doesn't apply, and =k= is "Stop agent": it kills the shell, sets the
+  task back to =todo= or cancels it, and clears its agent metadata.
+- A closed task gets no =!=: there is nothing to clean up. =s s= on it clears
+  the leftover metadata and asks whether to reopen the task, as for any closed
+  task.
 
 * Agent state while active
 
@@ -373,10 +391,11 @@ buffer reflects the state on every refresh:
   or by hand): treat it as finished, clear the stale metadata on the next
   =s= interaction, and say so in the echo area.
 
-* Launching from the Aven TUI
+* Launching from the Aven TUI (not planned)
 
-Because Aven's contract is "custom commands get task JSON", the same flow is
-available from =aven tui= through a small script:
+Not built: starting agents from the Emacs status buffer covers the need. If it
+is ever wanted, Aven's contract is "custom commands get task JSON", so the
+same flow could be available from =aven tui= through a small script:
 
 #+begin_src yaml
 tui:
@@ -453,7 +472,7 @@ contains a working implementation of the start path:
 3. Finish (local merge) and Abandon, including the status transitions.
 4. =◐= glyph driven by agent-shell events; =✓= from =agent-state=, including
    clearing the stale flag; the Agents filter.
-5. Mode without a worktree; the TUI custom command example.
+5. Mode without a worktree. (The TUI custom command is not planned.)
 6. (Version 2) PR flow.
 
 * Open questions

@@ -103,6 +103,11 @@ replaced by GLOBAL's list, or GLOBAL's list if PROJECT doesn't set KEY."
       (let ((exit-code (apply #'call-process "git" nil t nil args)))
         (cons exit-code (string-trim (buffer-string)))))))
 
+(defun aven--worktree-repo-p (directory)
+  "Non-nil when DIRECTORY is inside a git repository."
+  (and (file-directory-p directory)
+       (zerop (car (aven--worktree-git directory "rev-parse" "--is-inside-work-tree")))))
+
 (defun aven--worktree-branch-exists-p (project-root branch)
   (zerop (car (aven--worktree-git project-root "show-ref" "--verify" "--quiet"
                                   (concat "refs/heads/" branch)))))

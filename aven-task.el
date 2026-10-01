@@ -65,7 +65,7 @@ keeping point on the same line and column when possible."
           (insert (propertize "No description." 'font-lock-face 'shadow) "\n")
         (aven--insert-text description)
         (insert "\n"))
-      (aven--insert-agent-section (plist-get full :metadata) (plist-get task :status)))
+      (aven--insert-agent-section ref (plist-get full :metadata) (plist-get task :status)))
     (goto-char (point-min))
     (forward-line (1- line))
     (move-to-column column)))

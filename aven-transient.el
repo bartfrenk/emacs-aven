@@ -29,7 +29,7 @@
    ("-e" "Epics"      "--epics")
    ("-u" "Upcoming"   "--upcoming")
    ("-d" "Overdue"    "--overdue")
-   ("-a" "Agents"     "--has-metadata=agent-worktree")]
+   ("-a" "Agents"     "--has-metadata=agent-directory")]
   ["Arguments"
    ("-p" "Project"  "--project="
     :reader (lambda (prompt initial history)
@@ -229,13 +229,28 @@ its ref under :ref.")
 (defun aven/agent ()
   "Start, switch to or resume an agent on the task at point."
   (interactive)
-  (let ((ref (or (aven--ref-at-point) (aven--read-ref "Agent for: "))))
-    (setq aven--agent-menu-state (plist-put (aven--agent-state ref) :ref ref))
+  (let* ((ref (or (aven--ref-at-point) (aven--read-ref "Agent for: ")))
+         (state (aven--agent-state ref))
+         (project (plist-get (plist-get state :task) :project))
+         (known (and project (not (string-empty-p project))
+                     (seq-find #'file-directory-p (aven--project-paths project)))))
+    (setq aven--agent-menu-state
+          (append (list :ref ref
+                        ;; Whether a new agent works without a worktree by
+                        ;; default; projects without a known directory get
+                        ;; one, falling back when it isn't a repository.
+                        :direct (if known
+                                    (not (aven--agent-worktree-default-p project known))
+                                  (member project aven-agent-direct-projects)))
+                  state))
     (transient-setup 'aven--agent-menu)))
 
+(defun aven--agent-menu-directory ()
+  (let ((directory (plist-get aven--agent-menu-state :directory)))
+    (and directory (file-directory-p directory) directory)))
+
 (defun aven--agent-menu-worktree ()
-  (let ((worktree (plist-get aven--agent-menu-state :worktree)))
-    (and worktree (file-directory-p worktree) worktree)))
+  (and (plist-get aven--agent-menu-state :worktree) (aven--agent-menu-directory)))
 
 (defun aven--agent-menu-heading ()
   (let ((task (plist-get aven--agent-menu-state :task)))
@@ -246,7 +261,7 @@ its ref under :ref.")
 (defun aven--agent-menu-start-description ()
   (cond
    ((plist-get aven--agent-menu-state :shell) "Switch to agent")
-   ((aven--agent-menu-worktree) "Resume agent")
+   ((aven--agent-menu-directory) "Resume agent")
    (t "Start agent")))
 
 (transient-define-prefix aven--agent-menu ()
@@ -254,11 +269,15 @@ its ref under :ref.")
   :init-value (lambda (obj)
                 (oset obj value
                       (append (when (eq aven-agent-finish-strategy 'rebase) '("--rebase"))
-                              (when aven-agent-save-transcript '("--save-conversation")))))
+                              (when aven-agent-save-transcript '("--save-conversation"))
+                              (when (plist-get aven--agent-menu-state :direct)
+                                '("--no-worktree")))))
   [:description aven--agent-menu-heading
    ["Options"
+    ("-w" "Without a worktree" "--no-worktree"
+     :if-not aven--agent-menu-directory)
     ("-b" "Base branch" "--base="
-     :if-not aven--agent-menu-worktree)
+     :if-not aven--agent-menu-directory)
     ("-c" "Agent config" "--config="
      :if-not (lambda () (plist-get aven--agent-menu-state :shell))
      :reader (lambda (prompt initial history)
@@ -268,14 +287,16 @@ its ref under :ref.")
    ["Actions"
     ("s" aven--agent-menu-start :description aven--agent-menu-start-description)
     ("e" "Start, editing the first message" aven--agent-menu-start-edit
-     :if-not aven--agent-menu-worktree)
+     :if-not aven--agent-menu-directory)
     ("f" "Finish (merge and done)..." aven--agent-menu-finish :if aven--agent-menu-worktree)
-    ("k" "Abandon..." aven--agent-menu-abandon :if aven--agent-menu-worktree)
-    ("d" "Worktree in dired" aven--agent-menu-dired :if aven--agent-menu-worktree)
-    ("m" "Worktree in magit" aven--agent-menu-magit :if aven--agent-menu-worktree)]])
+    ("k" aven--agent-menu-abandon :if aven--agent-menu-directory
+     :description (lambda () (if (aven--agent-menu-worktree) "Abandon..." "Stop agent...")))
+    ("d" "Open in dired" aven--agent-menu-dired :if aven--agent-menu-directory)
+    ("m" "Open in magit" aven--agent-menu-magit :if aven--agent-menu-worktree)]])
 
 (defun aven--agent-menu-run (args edit)
   (aven-agent-start-or-switch (plist-get aven--agent-menu-state :ref)
+                              :worktree (not (member "--no-worktree" args))
                               :base (transient-arg-value "--base=" args)
                               :config (transient-arg-value "--config=" args)
                               :edit edit
@@ -302,7 +323,7 @@ its ref under :ref.")
 
 (defun aven--agent-menu-dired ()
   (interactive)
-  (dired (aven--agent-menu-worktree)))
+  (dired (aven--agent-menu-directory)))
 
 (defun aven--agent-menu-magit ()
   (interactive)

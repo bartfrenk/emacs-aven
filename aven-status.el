@@ -146,16 +146,18 @@ when possible."
          (agents (aven--agent-tasks))
          (glyphs (mapcar (lambda (agent)
                            (cons (plist-get (car agent) :ref)
-                                 (aven--agent-glyph (cdr agent) (plist-get (car agent) :status))))
+                                 (aven--agent-glyph (plist-get (car agent) :ref) (cdr agent)
+                                                    (plist-get (car agent) :status))))
                          agents))
          ;; The status buffer doesn't list done and canceled tasks, but
          ;; ones whose worktree remains still need finishing.
          (leftovers (mapcar #'car
                             (seq-filter (lambda (agent)
-                                          (let ((worktree (plist-get (cdr agent) :agent-worktree)))
+                                          (let ((directory (plist-get (cdr agent) :agent-directory)))
                                             (and (aven--agent-closed-p (plist-get (car agent) :status))
-                                                 worktree
-                                                 (file-directory-p worktree))))
+                                                 (plist-get (cdr agent) :agent-branch)
+                                                 directory
+                                                 (file-directory-p directory))))
                                         agents)))
          (groups (mapcar (lambda (group)
                            (cons (car group)
