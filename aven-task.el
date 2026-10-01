@@ -33,7 +33,8 @@
   "Ref of the task this buffer displays.")
 
 (define-derived-mode aven-task-mode special-mode "Aven-Task"
-  "Major mode for a buffer showing one Aven task's properties and description.")
+  "Major mode for a buffer showing one Aven task's properties and description."
+  (visual-line-mode 1))
 
 (with-eval-after-load 'evil
   (evil-set-initial-state 'aven-task-mode 'motion))
