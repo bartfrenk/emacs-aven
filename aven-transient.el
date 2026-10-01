@@ -239,6 +239,19 @@ buffer."
          (text (read-string "Note: ")))
     (aven--run "note" ref text)))
 
+(defun aven/delete ()
+  "Delete the task at point after confirmation.
+Aven only soft-deletes it: `aven restore' recovers it."
+  (interactive)
+  (let ((ref (aven--ref-at-point)))
+    (unless ref
+      (user-error "aven: no task at point"))
+    (when (y-or-n-p (format "Delete %s \"%s\"? " ref (aven--task-field ref :title)))
+      ;; The task's own buffer can no longer be refreshed once it is gone.
+      (when-let* ((buf (get-buffer (format "*aven: %s*" ref))))
+        (kill-buffer buf))
+      (aven--run-quietly "delete" ref))))
+
 (defun aven/sync ()
   "Sync Aven with its remote server."
   (interactive)
@@ -262,7 +275,8 @@ buffer."
     ("e" "Edit"        aven/edit)
     ("f" "Edit field"  aven/edit-field)
     ("d" "Description" aven/edit-description)
-    ("n" "Note"        aven/note)]
+    ("n" "Note"        aven/note)
+    ("D" "Delete"      aven/delete)]
    ["Workspace"
     ("g" "Sync"   aven/sync)
     ("y" "Doctor" aven/doctor)]])

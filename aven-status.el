@@ -30,6 +30,7 @@
 (declare-function aven/add "aven-transient")
 (declare-function aven/edit-field "aven-transient")
 (declare-function aven/note "aven-transient")
+(declare-function aven/delete "aven-transient")
 (declare-function aven/dispatch "aven-transient")
 
 ;; Defined in aven-task.el.
@@ -153,6 +154,7 @@ when possible."
     "a" #'aven/add
     "e" #'aven/edit-field
     "n" #'aven/note
+    "D" #'aven/delete
     "?" #'aven/dispatch))
 
 (provide 'aven-status)

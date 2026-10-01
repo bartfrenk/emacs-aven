@@ -24,6 +24,7 @@
 ;; about the forward reference from the evil keymap below.
 (declare-function aven/edit-field "aven-transient")
 (declare-function aven/note "aven-transient")
+(declare-function aven/delete "aven-transient")
 (declare-function aven/dispatch "aven-transient")
 
 (defvar-local aven-task--ref nil
@@ -73,6 +74,7 @@ keeping point on the same line and column when possible."
     "g" #'aven-task-refresh
     "e" #'aven/edit-field
     "n" #'aven/note
+    "D" #'aven/delete
     "?" #'aven/dispatch))
 
 (provide 'aven-task)
