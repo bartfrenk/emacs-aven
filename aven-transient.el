@@ -6,7 +6,7 @@
 
 ;;; Commentary:
 
-;; All transient prefixes (list/search/show/context/add/edit/dispatch)
+;; All transient prefixes (list/search/show/context/add/dispatch)
 ;; and the quick single-field edit commands.
 
 ;;; Code:
@@ -90,28 +90,6 @@
     (when (string-empty-p title)
       (user-error "aven: title required"))
     (apply #'aven--run "add" (append args (list title)))))
-
-(transient-define-prefix aven/edit ()
-  "Edit an Aven task."
-  ["Arguments"
-   ("-s" "Status"           "--status=")
-   ("-i" "Priority"         "--priority=")
-   ("-p" "Project"          "--project=")
-   ("-t" "Title"            "--title=")
-   ("-l" "Add label"        "--label=")
-   ("-L" "Remove label"     "--remove-label=")
-   ("-a" "Available at"     "--available-at=")
-   ("-A" "Clear available"  "--clear-available-at")
-   ("-d" "Due"              "--due=")
-   ("-D" "Clear due"        "--clear-due")
-   ("-e" "Epic (on/off)"    "--epic=")]
-  ["Action"
-   ("RET" "Apply to task" aven--edit-task)])
-
-(defun aven--edit-task (&optional args)
-  (interactive (list (transient-args 'aven/edit)))
-  (let ((ref (aven--read-ref "Edit task: ")))
-    (apply #'aven--run-quietly "edit" (append args (list ref)))))
 
 ;;; Quick field edits
 
@@ -272,9 +250,7 @@ Aven only soft-deletes it: `aven restore' recovers it."
     ("c" "Context" aven/context)]
    ["Task"
     ("a" "Add"         aven/add)
-    ("e" "Edit"        aven/edit)
-    ("f" "Edit field"  aven/edit-field)
-    ("d" "Description" aven/edit-description)
+    ("e" "Edit field"  aven/edit-field)
     ("n" "Note"        aven/note)
     ("D" "Delete"      aven/delete)]
    ["Workspace"
