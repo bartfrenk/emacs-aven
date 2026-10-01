@@ -143,7 +143,7 @@ when possible."
   (interactive)
   (let* ((buf (get-buffer-create aven-status-buffer-name))
          (workspace (aven--current-workspace))
-         (agents (aven--agent-worktrees))
+         (agents (aven--agent-tasks))
          (glyphs (mapcar (lambda (agent)
                            (cons (plist-get (car agent) :ref)
                                  (aven--agent-glyph (cdr agent) (plist-get (car agent) :status))))
@@ -152,15 +152,20 @@ when possible."
          ;; ones whose worktree remains still need finishing.
          (leftovers (mapcar #'car
                             (seq-filter (lambda (agent)
-                                          (and (aven--agent-closed-p (plist-get (car agent) :status))
-                                               (cdr agent)
-                                               (file-directory-p (cdr agent))))
+                                          (let ((worktree (plist-get (cdr agent) :agent-worktree)))
+                                            (and (aven--agent-closed-p (plist-get (car agent) :status))
+                                                 worktree
+                                                 (file-directory-p worktree))))
                                         agents)))
          (groups (mapcar (lambda (group)
                            (cons (car group)
-                                 (apply #'aven--list-json
-                                        (concat "--status=" (cdr group))
-                                        aven-status-filter)))
+                                 ;; aven rejects the agents filter until some
+                                 ;; task has had a worktree.
+                                 (unless (and (member aven--agent-filter aven-status-filter)
+                                              (null agents))
+                                   (apply #'aven--list-json
+                                          (concat "--status=" (cdr group))
+                                          aven-status-filter))))
                          '(("Active"  . "active")
                            ("Todo"    . "todo")
                            ("Backlog" . "backlog")

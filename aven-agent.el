@@ -14,6 +14,8 @@
 ;;   agent-worktree  the worktree's absolute path
 ;;   agent-base      the branch the worktree was created from
 ;;   agent-session   the agent-shell session id, to resume it
+;;   agent-state     set to "review" by the agent when its work is
+;;                   ready for review; cleared when it works again
 ;;
 ;; Finishing a task merges its branch and marks it done; abandoning it
 ;; sets it back to todo or cancels it.  Both remove the worktree.
@@ -41,6 +43,7 @@
 (declare-function agent-shell--resolve-config-designator "agent-shell")
 (declare-function agent-shell--resolved-agent-configs "agent-shell")
 (declare-function agent-shell--insert-to-shell-buffer "agent-shell")
+(declare-function shell-maker-busy "shell-maker")
 (declare-function magit-log-other "magit-log")
 (declare-function magit-status "magit-status")
 (defvar agent-shell--state)
@@ -68,17 +71,26 @@ this branch show what has been done so far.\n\n" ref title)
    context "\n\n"
    (format "You are in a dedicated git worktree on branch `%s`, branched \
 from `%s`. Commit your work on this branch.\n\n" branch base)
-   "When the work is complete and committed: leave an `aven note` \
-summarizing what changed and how you verified it, then stop. Do NOT mark \
-the task done; it is marked done when the branch is merged. If you get \
-blocked, leave a note explaining why and stop."))
+   (format "When the work is complete and committed: leave an `aven note` \
+summarizing what changed and how you verified it, then run \
+`aven edit %s --metadata agent-state=review` and stop. Do NOT mark the task \
+done; it is marked done when the branch is merged. If you get blocked, leave \
+a note explaining why and stop without setting agent-state." ref)))
 
 ;;; Task state
 
+(defvar-local aven--agent-permissions nil
+  "Ids of the permission requests an agent-shell is waiting on.")
+
+(defvar-local aven--agent-working nil
+  "Non-nil from an agent-shell's first activity in a turn until the
+turn ends.")
+
 (defun aven--agent-state (ref)
   "What is known about REF's agent, as a plist: the task (:task), the
-metadata linking it to a worktree (:branch, :worktree, :base and
-:session), and the live agent-shell buffer in that worktree (:shell)."
+metadata linking it to a worktree (:branch, :worktree, :base,
+:session and :review), and the live agent-shell buffer in that
+worktree (:shell)."
   (let* ((full (aven--task-full-json ref))
          (metadata (plist-get full :metadata))
          (worktree (plist-get metadata :agent-worktree)))
@@ -87,6 +99,7 @@ metadata linking it to a worktree (:branch, :worktree, :base and
           :worktree worktree
           :base     (plist-get metadata :agent-base)
           :session  (plist-get metadata :agent-session)
+          :review   (equal (plist-get metadata :agent-state) "review")
           :shell    (and worktree (aven--agent-shell-buffer-for worktree)))))
 
 (defun aven--agent-shell-buffer-for (directory)
@@ -106,10 +119,13 @@ aven rejects removing a key that was never assigned in the workspace."
   (when-let* ((args (append edit-args
                             (delq nil
                                   (mapcar (lambda (key)
-                                            (when (plist-get state key)
-                                              (format "--remove-metadata=agent-%s"
-                                                      (substring (symbol-name key) 1))))
-                                          '(:branch :worktree :base :session))))))
+                                            (when (plist-get state (car key))
+                                              (concat "--remove-metadata=" (cdr key))))
+                                          '((:branch . "agent-branch")
+                                            (:worktree . "agent-worktree")
+                                            (:base . "agent-base")
+                                            (:session . "agent-session")
+                                            (:review . "agent-state")))))))
     (apply #'aven--run-quietly "edit" ref args)))
 
 ;;; Display
@@ -126,34 +142,57 @@ aven rejects removing a key that was never assigned in the workspace."
   "Face for the glyph of a done or canceled task whose worktree remains."
   :group 'aven)
 
-(defun aven--agent-worktrees ()
-  "List of (TASK . WORKTREE) for every task linked to a worktree, where
+(defface aven-agent-waiting-face '((t :inherit warning))
+  "Face for the glyph of a task whose agent is waiting for the user."
+  :group 'aven)
+
+(defface aven-agent-review-face '((t :inherit success :weight bold))
+  "Face for the glyph of a task whose agent's work is ready for review."
+  :group 'aven)
+
+(defconst aven--agent-filter "--has-metadata=agent-worktree"
+  "`aven list' argument selecting the tasks linked to a worktree.")
+
+(defun aven--agent-tasks ()
+  "List of (TASK . METADATA) for every task linked to a worktree, where
 TASK is the task as `aven list' reports it."
   ;; aven rejects filtering on a key that no task in the workspace has
   ;; ever had, so check that one has first.
   (when (member "agent-worktree" (aven--metadata-keys))
     (mapcar (lambda (task)
-              (cons task (plist-get (plist-get (aven--task-full-json (plist-get task :ref))
-                                               :metadata)
-                                    :agent-worktree)))
-            (aven--list-json "--has-metadata=agent-worktree"))))
+              (cons task (plist-get (aven--task-full-json (plist-get task :ref)) :metadata)))
+            (aven--list-json aven--agent-filter))))
 
 (defun aven--agent-closed-p (status)
   (member status '("done" "canceled")))
 
-(defun aven--agent-glyph (worktree &optional status)
-  "Glyph for an agent in WORKTREE, for a task with STATUS: ! when the
-task is done or canceled, ● when an agent-shell is running there, ○
-when none is, and nil when WORKTREE is nil or gone."
-  (when (and worktree (file-directory-p worktree))
-    (cond
-     ((aven--agent-closed-p status)
-      (propertize "!" 'font-lock-face 'aven-agent-leftover-face
-                  'help-echo (format "Task is %s, but its worktree remains" status)))
-     ((aven--agent-shell-buffer-for worktree)
-      (propertize "●" 'font-lock-face 'aven-agent-running-face 'help-echo "Agent running"))
-     (t
-      (propertize "○" 'font-lock-face 'aven-agent-parked-face 'help-echo "No agent running")))))
+(defun aven--agent-glyph (metadata status)
+  "Glyph for the agent of a task with METADATA and STATUS, or nil when
+the task has no worktree:
+  !  the task is done or canceled, but its worktree remains
+  ◐  its agent is asking for permission
+  ●  its agent is working
+  ✓  its agent marked the work ready for review
+  ◐  its agent is waiting for input
+  ○  no agent is running in its worktree"
+  (let* ((worktree (plist-get metadata :agent-worktree))
+         (shell (and worktree (aven--agent-shell-buffer-for worktree)))
+         (glyph (lambda (text face help) (propertize text 'font-lock-face face 'help-echo help))))
+    (when (and worktree (file-directory-p worktree))
+      (cond
+       ((aven--agent-closed-p status)
+        (funcall glyph "!" 'aven-agent-leftover-face
+                 (format "Task is %s, but its worktree remains" status)))
+       ((and shell (buffer-local-value 'aven--agent-permissions shell))
+        (funcall glyph "◐" 'aven-agent-waiting-face "Agent is asking for permission"))
+       ((and shell (with-current-buffer shell (shell-maker-busy)))
+        (funcall glyph "●" 'aven-agent-running-face "Agent is working"))
+       ((equal (plist-get metadata :agent-state) "review")
+        (funcall glyph "✓" 'aven-agent-review-face "Ready for review"))
+       (shell
+        (funcall glyph "◐" 'aven-agent-waiting-face "Agent is waiting for input"))
+       (t
+        (funcall glyph "○" 'aven-agent-parked-face "No agent running"))))))
 
 (defun aven--agent-branch-summary (worktree base)
   "How the branch checked out in WORKTREE compares with BASE, such as
@@ -202,7 +241,7 @@ and STATUS, or nothing when the task has no worktree."
                                      (lambda () (dired worktree)))
           (insert "\n")
           (funcall label "agent")
-          (insert (aven--agent-glyph worktree status) " ")
+          (insert (aven--agent-glyph metadata status) " ")
           (if shell
               (aven--agent-insert-button (buffer-name shell)
                                          (lambda () (pop-to-buffer shell)))
@@ -297,11 +336,7 @@ with EDIT, leave it in the input to edit before sending."
            (agent-shell--new-shell :location (file-name-as-directory worktree)
                                    :config config :no-display t))))
     (aven--agent-record-session ref buffer session)
-    ;; Keep the glyphs in Aven buffers in step with the agent running.
-    (with-current-buffer buffer
-      (add-hook 'kill-buffer-hook
-                (lambda () (run-at-time 0 nil #'aven--refresh-open-buffers))
-                nil t))
+    (aven--agent-track ref buffer)
     (aven--refresh-open-buffers)
     (cond
      (session (display-buffer buffer t))
@@ -310,6 +345,56 @@ with EDIT, leave it in the input to edit before sending."
         (agent-shell--insert-to-shell-buffer :shell-buffer buffer :text prompt
                                              :submit t :no-focus t)))
     buffer))
+
+(defvar aven--agent-refresh-timer nil)
+
+(defun aven--agent-schedule-refresh ()
+  "Refresh the Aven buffers in a second, unless that is scheduled already."
+  (unless (timerp aven--agent-refresh-timer)
+    (setq aven--agent-refresh-timer
+          (run-at-time 1 nil (lambda ()
+                               (setq aven--agent-refresh-timer nil)
+                               (aven--refresh-open-buffers))))))
+
+(defun aven--agent-clear-review (ref)
+  "Remove REF's ready-for-review flag, if it has one."
+  (when (plist-get (aven--agent-state ref) :review)
+    (aven--run-quietly "edit" ref "--remove-metadata=agent-state")))
+
+(defun aven--agent-track (ref shell-buffer)
+  "Keep the glyph of REF, whose agent runs in SHELL-BUFFER, in step with
+the agent: refresh the Aven buffers when it starts or ends a turn,
+asks for or gets permission, or is killed, and clear REF's
+ready-for-review flag when it starts working again."
+  (let ((subscribe (lambda (event fn)
+                     (agent-shell-subscribe-to :shell-buffer shell-buffer
+                                               :event event :on-event fn))))
+    (dolist (event '(tool-call-update agent-message-chunk))
+      (funcall subscribe event
+               (lambda (_event)
+                 (unless aven--agent-working
+                   (setq aven--agent-working t)
+                   (run-at-time 0 nil #'aven--agent-clear-review ref)
+                   (aven--agent-schedule-refresh)))))
+    (dolist (event '(turn-complete error))
+      (funcall subscribe event
+               (lambda (_event)
+                 (setq aven--agent-working nil
+                       aven--agent-permissions nil)
+                 (aven--agent-schedule-refresh))))
+    (funcall subscribe 'permission-request
+             (lambda (event)
+               (push (map-nested-elt event '(:data :request-id)) aven--agent-permissions)
+               (aven--agent-schedule-refresh)))
+    (funcall subscribe 'permission-response
+             (lambda (event)
+               (setq aven--agent-permissions
+                     (delete (map-nested-elt event '(:data :request-id)) aven--agent-permissions))
+               (aven--agent-schedule-refresh)))
+    (with-current-buffer shell-buffer
+      (add-hook 'kill-buffer-hook
+                (lambda () (run-at-time 0 nil #'aven--refresh-open-buffers))
+                nil t))))
 
 (defun aven--agent-prompt (ref task branch base resuming)
   (funcall aven-agent-prompt-function

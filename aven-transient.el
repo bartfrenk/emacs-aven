@@ -28,7 +28,8 @@
    ("-b" "Blocked"    "--blocked")
    ("-e" "Epics"      "--epics")
    ("-u" "Upcoming"   "--upcoming")
-   ("-d" "Overdue"    "--overdue")]
+   ("-d" "Overdue"    "--overdue")
+   ("-a" "Agents"     "--has-metadata=agent-worktree")]
   ["Arguments"
    ("-p" "Project"  "--project="
     :reader (lambda (prompt initial history)

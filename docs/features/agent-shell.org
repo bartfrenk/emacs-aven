@@ -204,27 +204,30 @@ or simply "on when the project root is a git repo").
 
 ** Status buffer
 
-Tasks with an agent get a glyph before the title:
+Tasks with an agent get a glyph before the title. The first row that applies
+wins:
 
-| Glyph | Meaning          | Derived from                                            |
-|-------+------------------+---------------------------------------------------------|
-| =●=   | running          | live shell, turn in progress                            |
-| =◐=   | needs you        | live shell with a pending permission request, or idle   |
-|       |                  | after a turn, without =agent-state=review=              |
-| =✓=   | ready for review | =agent-state=review= metadata on the task               |
-| =○=   | parked           | worktree exists, no live shell                          |
+| Glyph | Meaning          | Derived from                                          |
+|-------+------------------+-------------------------------------------------------|
+| =!=   | closed           | task is done or canceled, but its worktree remains    |
+| =◐=   | needs you        | live shell with a pending permission request          |
+| =●=   | running          | live shell, turn in progress                          |
+| =✓=   | ready for review | =agent-state=review= metadata on the task             |
+| =◐=   | needs you        | live shell, idle between turns                        |
+| =○=   | parked           | worktree exists, no live shell                        |
 
-=●=, =◐= and =○= come from local Emacs state: agent-shell buffers and their
-=turn-complete=, =permission-request= and =clean-up= events, plus
-=agent-branch= metadata. They are not stored in Aven. The status buffer
-refreshes on those events, debounced to at most once per second.
+=●=, =◐= and =○= come from local Emacs state: whether the shell is busy, and
+the =permission-request= and =permission-response= events it emits. They are
+not stored in Aven. The status buffer refreshes when a turn starts or ends
+(=turn-complete=, =error=), on permission events and when the shell buffer is
+killed, debounced to at most once per second.
 
 =✓= is different: the agent sets it explicitly, as the =agent-state=review=
 metadata flag, as the last step of the opening prompt's instructions.
 Because it is stored in Aven, it survives Emacs restarts, syncs, and is
 visible in the Aven TUI and to =aven list --metadata agent-state=review=.
-=✓= takes precedence over =○=: a parked task that is ready for review shows
-=✓=.
+=✓= takes precedence over the idle =◐= and over =○=, but a running agent or
+one asking for permission shows =●= or =◐=.
 
 The flag goes stale when work resumes after review, for example when the user
 asks the agent for changes. emacs-aven clears it (=--remove-metadata
@@ -234,8 +237,8 @@ while the flag is set. The prompt instructions stay in the conversation, so
 the agent sets the flag again when it is done. Finish and Abandon remove it
 along with the other =agent-*= metadata.
 
-=aven-status= could also gain a "Agents" filter that shows only tasks with
-=agent-branch=. That makes it a small dashboard, similar to =workmux
+The status filter (=f=) has an "Agents" switch, =-a=, that shows only tasks
+with a worktree. That makes it a small dashboard, similar to =workmux
 dashboard=.
 
 ** Task buffer
