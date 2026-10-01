@@ -83,7 +83,9 @@ body of its (folded) section."
     (if (string-empty-p description)
         (insert "    " (propertize "No description." 'font-lock-face 'shadow) "\n")
       (dolist (line (split-string description "\n"))
-        (insert "    " line "\n"))))
+        (insert "    ")
+        (aven--insert-text line)
+        (insert "\n"))))
   (insert "\n"))
 
 (defun aven--insert-task-line (task)

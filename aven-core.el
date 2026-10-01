@@ -40,6 +40,44 @@
   "Face for a task's due date."
   :group 'aven)
 
+(defconst aven--org-link-pattern
+  "\\[\\[\\([^]\n]+\\)\\]\\(?:\\[\\([^]\n]+\\)\\]\\)?\\]"
+  "Pattern matching an Org bracket link, such as an org-roam
+reference [[id:...][Title]]: group 1 is the target, group 2 the
+optional description.")
+
+(declare-function org-link-open-from-string "ol")
+(defvar org-link-frame-setup)
+
+(defun aven--follow-org-link (button)
+  "Open the Org link that BUTTON stands for in another window, so the
+Aven buffer stays visible alongside it."
+  (require 'org)
+  (let ((org-link-frame-setup (cons '(file . find-file-other-window)
+                                    org-link-frame-setup)))
+    (org-link-open-from-string (format "[[%s]]" (button-get button 'aven-link)))))
+
+(defun aven--insert-text (text)
+  "Insert TEXT, rendering its Org bracket links (e.g. org-roam
+references) as buttons that show their description and follow
+the link."
+  (let ((start 0))
+    (while (string-match aven--org-link-pattern text start)
+      (let ((target (match-string 1 text))
+            (label  (or (match-string 2 text) (match-string 1 text)))
+            (end    (match-end 0)))
+        (insert (substring text start (match-beginning 0)))
+        (insert-text-button label
+                            'action #'aven--follow-org-link
+                            'aven-link target
+                            'help-echo target
+                            'follow-link t
+                            'face 'link
+                            ;; Font-lock would strip a plain `face'.
+                            'font-lock-face 'link)
+        (setq start end)))
+    (insert (substring text start))))
+
 (defun aven--ref-at-point ()
   "Task ref at point, or nil."
   (or (when-let* ((section (and (fboundp 'magit-current-section) (magit-current-section)))
