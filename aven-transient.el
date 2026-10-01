@@ -286,6 +286,7 @@ its ref under :ref.")
 
 (defun aven--agent-menu-magit ()
   (interactive)
+  (require 'magit)
   (magit-status (aven--agent-menu-worktree)))
 
 (defun aven/sync ()
