@@ -6,8 +6,8 @@
 
 ;;; Commentary:
 
-;; All transient prefixes (list/search/show/context/add/dispatch)
-;; and the quick single-field edit commands.
+;; All transient prefixes (list/status-filter/search/show/context/
+;; add/dispatch) and the quick single-field edit commands.
 
 ;;; Code:
 
@@ -16,6 +16,7 @@
 (require 'aven-data)
 (require 'aven-process)
 (require 'aven-description)
+(require 'aven-status)
 
 (transient-define-prefix aven/list ()
   "List Aven tasks."
@@ -39,6 +40,38 @@
 (defun aven--list-tasks (&optional args)
   (interactive (list (transient-args 'aven/list)))
   (apply #'aven--run "list" args))
+
+(transient-define-prefix aven/status-filter ()
+  "Filter the tasks shown in the Aven status buffer."
+  :init-value (lambda (obj) (oset obj value aven-status-filter))
+  :incompatible '(("--ready" "--blocked"))
+  ["Filters"
+   ("-r" "Ready only" "--ready")
+   ("-b" "Blocked"    "--blocked")
+   ("-e" "Epics"      "--epics")
+   ("-u" "Upcoming"   "--upcoming")
+   ("-d" "Overdue"    "--overdue")]
+  ["Arguments"
+   ("-p" "Project"  "--project="
+    :reader (lambda (prompt initial history)
+              (completing-read prompt (aven--project-keys) nil nil initial history)))
+   ("-i" "Priority" "--priority=" :choices ("none" "low" "medium" "high" "urgent"))
+   ("-l" "Label"    "--label="
+    :reader (lambda (prompt initial history)
+              (completing-read prompt (aven--label-names) nil nil initial history)))]
+  ["Action"
+   ("RET" "Apply" aven--status-filter-apply)
+   ("c"   "Clear" aven--status-filter-clear)])
+
+(defun aven--status-filter-apply (&optional args)
+  (interactive (list (transient-args 'aven/status-filter)))
+  (setq aven-status-filter args)
+  (aven-status-refresh))
+
+(defun aven--status-filter-clear ()
+  (interactive)
+  (setq aven-status-filter nil)
+  (aven-status-refresh))
 
 (transient-define-prefix aven/search ()
   "Search Aven tasks."

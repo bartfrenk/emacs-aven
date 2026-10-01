@@ -31,10 +31,15 @@
 (declare-function aven/edit-field "aven-transient")
 (declare-function aven/note "aven-transient")
 (declare-function aven/delete "aven-transient")
+(declare-function aven/status-filter "aven-transient")
 (declare-function aven/dispatch "aven-transient")
 
 ;; Defined in aven-task.el.
 (declare-function aven--show-ref "aven-task")
+
+(defvar aven-status-filter nil
+  "Extra `aven list' arguments, such as \"--project=app\", that
+narrow the tasks shown in the status buffer.")
 
 (defun aven--priority-face (priority)
   "Face for PRIORITY, matching the colors of the Aven output buffer."
@@ -127,10 +132,15 @@ when possible."
   (interactive)
   (let* ((buf (get-buffer-create aven-status-buffer-name))
          (workspace (aven--current-workspace))
-         (groups (list (cons "Active"  (aven--list-json "--status=active"))
-                       (cons "Todo"    (aven--list-json "--status=todo"))
-                       (cons "Backlog" (aven--list-json "--status=backlog"))
-                       (cons "Inbox"   (aven--list-json "--status=inbox")))))
+         (groups (mapcar (lambda (group)
+                           (cons (car group)
+                                 (apply #'aven--list-json
+                                        (concat "--status=" (cdr group))
+                                        aven-status-filter)))
+                         '(("Active"  . "active")
+                           ("Todo"    . "todo")
+                           ("Backlog" . "backlog")
+                           ("Inbox"   . "inbox")))))
     (with-current-buffer buf
       (unless (derived-mode-p 'aven-status-mode)
         (aven-status-mode))
@@ -138,7 +148,13 @@ when possible."
         (let ((inhibit-read-only t))
           (erase-buffer)
           (when workspace
-            (insert (propertize (format "Workspace: %s" workspace) 'font-lock-face 'bold) "\n\n"))
+            (insert (propertize (format "Workspace: %s" workspace) 'font-lock-face 'bold) "\n"))
+          (when aven-status-filter
+            (insert (propertize (format "Filter: %s" (string-join aven-status-filter " "))
+                                'font-lock-face 'bold)
+                    "\n"))
+          (unless (eq (point-min) (point))
+            (insert "\n"))
           (magit-insert-section (aven-status)
             (dolist (group groups)
               (aven--insert-task-section (car group) nil (cdr group))))
@@ -171,6 +187,7 @@ when possible."
     "e" #'aven/edit-field
     "n" #'aven/note
     "D" #'aven/delete
+    "f" #'aven/status-filter
     "?" #'aven/dispatch))
 
 (provide 'aven-status)
