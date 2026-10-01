@@ -646,7 +646,8 @@ DELETE-BRANCH and FORCE are passed to `aven--worktree-remove'."
 
 (define-derived-mode aven-agent-finish-mode special-mode "Aven-Finish"
   "Major mode for reviewing a task's branch before merging it.
-\\<aven-agent-finish-mode-map>\\[aven-agent-finish-confirm] merges, \\[aven-agent-finish-cancel] cancels.")
+\\<aven-agent-finish-mode-map>\\[aven-agent-finish-confirm] merges, \\[aven-agent-finish-cancel] cancels."
+  (visual-line-mode 1))
 
 (with-eval-after-load 'evil
   (evil-set-initial-state 'aven-agent-finish-mode 'motion))
