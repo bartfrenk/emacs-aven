@@ -38,6 +38,7 @@
 (declare-function agent-shell--resolve-config-designator "agent-shell")
 (declare-function agent-shell--resolved-agent-configs "agent-shell")
 (declare-function agent-shell--insert-to-shell-buffer "agent-shell")
+(declare-function magit-log-other "magit-log")
 (defvar agent-shell--state)
 
 (defcustom aven-agent-branch-prefix "ag--"
@@ -105,6 +106,93 @@ never assigned in the workspace."
                                               (substring (symbol-name key) 1))))
                                   '(:branch :worktree :base :session)))))
     (apply #'aven--run-quietly "edit" ref args)))
+
+;;; Display
+
+(defface aven-agent-running-face '((t :inherit success))
+  "Face for the glyph of a task whose agent is running."
+  :group 'aven)
+
+(defface aven-agent-parked-face '((t :inherit shadow))
+  "Face for the glyph of a task whose worktree has no agent running."
+  :group 'aven)
+
+(defun aven--agent-worktrees ()
+  "Alist of (REF . WORKTREE) for every task linked to a worktree."
+  (mapcar (lambda (task)
+            (let ((ref (plist-get task :ref)))
+              (cons ref (plist-get (plist-get (aven--task-full-json ref) :metadata)
+                                   :agent-worktree))))
+          (aven--list-json "--has-metadata=agent-worktree")))
+
+(defun aven--agent-glyph (worktree)
+  "Glyph for an agent in WORKTREE: ● when an agent-shell is running
+there, ○ when none is, and nil when WORKTREE is nil or gone."
+  (when (and worktree (file-directory-p worktree))
+    (if (aven--agent-shell-buffer-for worktree)
+        (propertize "●" 'font-lock-face 'aven-agent-running-face 'help-echo "Agent running")
+      (propertize "○" 'font-lock-face 'aven-agent-parked-face 'help-echo "No agent running"))))
+
+(defun aven--agent-branch-summary (worktree base)
+  "How the branch checked out in WORKTREE compares with BASE, such as
+\"3 commits ahead of main, clean\"."
+  (let ((ahead (and base (aven--worktree-git worktree "rev-list" "--count"
+                                             (concat base "..HEAD"))))
+        (status (aven--worktree-git worktree "status" "--porcelain")))
+    (string-join
+     (delq nil
+           (list (when (and ahead (zerop (car ahead)))
+                   (let ((n (string-to-number (cdr ahead))))
+                     (format "%d commit%s ahead of %s" n (if (= n 1) "" "s") base)))
+                 (when (zerop (car status))
+                   (if (string-empty-p (cdr status)) "clean" "uncommitted changes"))))
+     ", ")))
+
+(defun aven--agent-insert-button (label action)
+  (insert-text-button label
+                      'action (lambda (_button) (funcall action))
+                      'follow-link t
+                      'face 'link
+                      ;; Font-lock would strip a plain `face'.
+                      'font-lock-face 'link))
+
+(defun aven--insert-agent-section (metadata)
+  "Insert the Agent section of a task buffer, for a task with METADATA,
+or nothing when the task has no worktree."
+  (let ((branch (plist-get metadata :agent-branch))
+        (worktree (plist-get metadata :agent-worktree))
+        (base (plist-get metadata :agent-base))
+        (label (lambda (text)
+                 (insert (propertize (format "%s:" text) 'font-lock-face 'font-lock-comment-face)
+                         " "))))
+    (when worktree
+      (insert "\n" (propertize "Agent" 'font-lock-face 'bold) "\n\n")
+      (if (not (file-directory-p worktree))
+          (progn (funcall label "worktree")
+                 (insert (abbreviate-file-name worktree) " "
+                         (propertize "(gone)" 'font-lock-face 'shadow) "\n"))
+        (let ((shell (aven--agent-shell-buffer-for worktree)))
+          (funcall label "branch")
+          (aven--agent-insert-button
+           branch (lambda ()
+                    (require 'magit)
+                    (let ((default-directory (file-name-as-directory worktree)))
+                      (magit-log-other (list (if base (concat base ".." branch) branch))))))
+          (let ((summary (aven--agent-branch-summary worktree base)))
+            (unless (string-empty-p summary)
+              (insert " (" summary ")")))
+          (insert "\n")
+          (funcall label "worktree")
+          (aven--agent-insert-button (abbreviate-file-name worktree)
+                                     (lambda () (dired worktree)))
+          (insert "\n")
+          (funcall label "agent")
+          (insert (aven--agent-glyph worktree) " ")
+          (if shell
+              (aven--agent-insert-button (buffer-name shell)
+                                         (lambda () (pop-to-buffer shell)))
+            (insert (propertize "not running" 'font-lock-face 'shadow)))
+          (insert "\n"))))))
 
 ;;; Project directory and branch
 
@@ -194,6 +282,12 @@ with EDIT, leave it in the input to edit before sending."
            (agent-shell--new-shell :location (file-name-as-directory worktree)
                                    :config config :no-display t))))
     (aven--agent-record-session ref buffer session)
+    ;; Keep the glyphs in Aven buffers in step with the agent running.
+    (with-current-buffer buffer
+      (add-hook 'kill-buffer-hook
+                (lambda () (run-at-time 0 nil #'aven--refresh-open-buffers))
+                nil t))
+    (aven--refresh-open-buffers)
     (cond
      (session (display-buffer buffer t))
      (edit (agent-shell--insert-to-shell-buffer :shell-buffer buffer :text prompt))

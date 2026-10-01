@@ -243,14 +243,21 @@ An "Agent" section between the description and the notes:
 
 #+begin_example
 Agent
-  Branch    ag--kick-off-agent-shell  (3 commits ahead of main, clean)
-  Worktree  ~/code/projects/emacs-aven/.workmux/ag--kick-off-agent-shell
-  Shell     *agent-shell: Claude Code @ ag--kick-off-agent-shell*  ● running
+
+branch: ag--kick-off-agent-shell (3 commits ahead of main, clean)
+worktree: ~/code/projects/emacs-aven/.workmux/ag--kick-off-agent-shell
+agent: ● *agent-shell: Claude Code @ ag--kick-off-agent-shell*
 #+end_example
 
-Each line is a button: the branch opens =magit-log= for =main..branch=, the
-worktree opens dired, and the shell switches to the shell buffer. This section
-is where the user reviews the work before finishing.
+The lines use the same =label: value= style as the task's properties. Each
+value is a button: the branch opens =magit-log= for =main..branch=, the
+worktree opens dired, and the agent switches to the shell buffer. Without a
+live shell, the agent line reads =○ not running=. If the worktree is gone,
+the section shows only its path, marked =(gone)=. This section is where the
+user reviews the work before finishing.
+
+The status buffer and task buffers refresh when an agent-shell starts or its
+buffer is killed, so =●= and =○= stay current.
 
 ** From the shell buffer
 

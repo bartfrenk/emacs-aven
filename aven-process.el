@@ -54,6 +54,15 @@
 (with-eval-after-load 'evil
   (evil-set-initial-state 'aven-output-mode 'motion))
 
+(defun aven--refresh-open-buffers ()
+  "Refresh the Aven status buffer and every open Aven task buffer."
+  (when (get-buffer aven-status-buffer-name)
+    (aven-status-refresh))
+  (dolist (task-buf (buffer-list))
+    (with-current-buffer task-buf
+      (when (derived-mode-p 'aven-task-mode)
+        (aven-task-refresh)))))
+
 (defun aven--call (buffer-name args &optional no-display)
   "Run aven with ARGS, a list of strings, and display the output in
 BUFFER-NAME. When NO-DISPLAY is non-nil, the buffer is updated and
@@ -70,12 +79,7 @@ area instead."
                         (string-join (mapcar #'shell-quote-argument args) " ")))
         (setq exit-code (apply #'call-process aven--executable nil t nil args))
         (goto-char (point-min))))
-    (when (get-buffer aven-status-buffer-name)
-      (aven-status-refresh))
-    (dolist (task-buf (buffer-list))
-      (with-current-buffer task-buf
-        (when (derived-mode-p 'aven-task-mode)
-          (aven-task-refresh))))
+    (aven--refresh-open-buffers)
     (if (and no-display (eql exit-code 0))
         (message "aven %s" (string-join args " "))
       (display-buffer buf))))

@@ -12,6 +12,7 @@
 
 (require 'aven-core)
 (require 'aven-data)
+(require 'aven-agent)
 ;; `evil-define-key' is a macro; the byte-compiler must see its real
 ;; definition at compile time or it silently compiles the calls below
 ;; into runtime calls to a nonexistent function `evil-define-key'.
@@ -48,7 +49,8 @@
 keeping point on the same line and column when possible."
   (interactive)
   (let* ((ref aven-task--ref)
-         (task (aven--task-json ref))
+         (full (aven--task-full-json ref))
+         (task (plist-get full :task))
          (description (aven--task-description ref))
          (line (line-number-at-pos))
          (column (current-column)))
@@ -62,7 +64,8 @@ keeping point on the same line and column when possible."
       (if (string-empty-p description)
           (insert (propertize "No description." 'font-lock-face 'shadow) "\n")
         (aven--insert-text description)
-        (insert "\n")))
+        (insert "\n"))
+      (aven--insert-agent-section (plist-get full :metadata)))
     (goto-char (point-min))
     (forward-line (1- line))
     (move-to-column column)))

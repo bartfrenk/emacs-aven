@@ -13,6 +13,7 @@
 (require 'magit-section)
 (require 'aven-core)
 (require 'aven-data)
+(require 'aven-agent)
 ;; `evil-define-key' is a macro; the byte-compiler must see its real
 ;; definition at compile time or it silently compiles the calls below
 ;; into runtime calls to a nonexistent function `evil-define-key'.
@@ -47,9 +48,10 @@ narrow the tasks shown in the status buffer.")
     ("low"    'shadow)
     (_        'default)))
 
-(defun aven--task-line-text (task)
-  "Text of TASK's line: ref, priority, project, labels, description,
-and due date. A priority of none is left out."
+(defun aven--task-line-text (task &optional glyph)
+  "Text of TASK's line: ref, priority, project, labels, GLYPH (marking
+the state of its agent, if any), description, and due date. A
+priority of none is left out."
   (let ((ref      (plist-get task :ref))
         (priority (plist-get task :priority))
         (project  (plist-get task :project))
@@ -65,6 +67,7 @@ and due date. A priority of none is left out."
        (concat (propertize project 'font-lock-face 'aven-project-face) " "))
      (when labels
        (concat (propertize (string-join labels ",") 'font-lock-face 'aven-label-face) " "))
+     (when glyph (concat glyph " "))
      title
      (unless (string-empty-p due)
        (concat " " (propertize (format "[%s]" due) 'font-lock-face 'aven-due-face))))))
@@ -86,21 +89,23 @@ body of its (folded) section."
         (insert "\n"))))
   (insert "\n"))
 
-(defun aven--insert-task-line (task)
+(defun aven--insert-task-line (task &optional glyph)
   "Insert TASK as a folded section: the heading is its formatted line,
-the body is its properties drawer and description."
+with GLYPH marking the state of its agent, and the body is its
+properties drawer and description."
   (magit-insert-section (aven-task (plist-get task :ref) t)
-    (magit-insert-heading (aven--task-line-text task))
+    (magit-insert-heading (aven--task-line-text task glyph))
     (aven--insert-task-drawer task)))
 
-(defun aven--insert-task-section (heading hide tasks)
-  "Insert a section titled HEADING listing TASKS.
+(defun aven--insert-task-section (heading hide tasks &optional glyphs)
+  "Insert a section titled HEADING listing TASKS, marking each task
+with its glyph in GLYPHS, an alist of (REF . GLYPH).
 When HIDE is non-nil, the section starts folded."
   (when tasks
     (magit-insert-section (aven-tasks heading hide)
       (magit-insert-heading (format "%s (%d)" heading (length tasks)))
       (dolist (task tasks)
-        (aven--insert-task-line task))
+        (aven--insert-task-line task (cdr (assoc (plist-get task :ref) glyphs))))
       (insert "\n"))))
 
 (define-derived-mode aven-status-mode magit-section-mode "Aven-Status"
@@ -138,6 +143,9 @@ when possible."
   (interactive)
   (let* ((buf (get-buffer-create aven-status-buffer-name))
          (workspace (aven--current-workspace))
+         (glyphs (mapcar (lambda (agent)
+                           (cons (car agent) (aven--agent-glyph (cdr agent))))
+                         (aven--agent-worktrees)))
          (groups (mapcar (lambda (group)
                            (cons (car group)
                                  (apply #'aven--list-json
@@ -163,7 +171,7 @@ when possible."
             (insert "\n"))
           (magit-insert-section (aven-status)
             (dolist (group groups)
-              (aven--insert-task-section (car group) nil (cdr group))))
+              (aven--insert-task-section (car group) nil (cdr group) glyphs)))
           (when (eq (point-min) (point-max))
             (insert (propertize "No tasks.\n" 'font-lock-face 'shadow)))
           (let ((magit-section-cache-visibility nil))
