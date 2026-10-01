@@ -36,16 +36,28 @@
 ;; Defined in aven-task.el.
 (declare-function aven--show-ref "aven-task")
 
+(defun aven--priority-face (priority)
+  "Face for PRIORITY, matching the colors of the Aven output buffer."
+  (pcase priority
+    ("urgent" 'error)
+    ("high"   'warning)
+    ("low"    'shadow)
+    (_        'default)))
+
 (defun aven--task-line-text (task)
-  "Text of TASK's line: ref, project, labels, description, and due date."
-  (let ((ref     (plist-get task :ref))
-        (project (plist-get task :project))
-        (labels  (plist-get task :labels))
-        (due     (plist-get task :due_on))
-        (title   (plist-get task :title)))
+  "Text of TASK's line: ref, priority, project, labels, description,
+and due date. A priority of none is left out."
+  (let ((ref      (plist-get task :ref))
+        (priority (plist-get task :priority))
+        (project  (plist-get task :project))
+        (labels   (plist-get task :labels))
+        (due      (plist-get task :due_on))
+        (title    (plist-get task :title)))
     (concat
      (propertize ref 'font-lock-face 'aven-ref-face)
      " "
+     (unless (member priority '(nil "" "none"))
+       (concat (propertize priority 'font-lock-face (aven--priority-face priority)) " "))
      (unless (string-empty-p project)
        (concat (propertize project 'font-lock-face 'aven-project-face) " "))
      (when labels
