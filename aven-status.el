@@ -146,6 +146,10 @@ when possible."
 (with-eval-after-load 'evil
   (evil-define-key 'motion aven-status-mode-map
     (kbd "RET") #'aven-status-visit-task-or-toggle
+    ;; Logical-line motion overshoots the folded task bodies, which
+    ;; are invisible text; visual-line motion steps over them cleanly.
+    "j" #'evil-next-visual-line
+    "k" #'evil-previous-visual-line
     "g" #'aven-status-refresh
     "L" #'aven/list
     "s" #'aven/search
