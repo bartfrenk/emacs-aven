@@ -105,7 +105,8 @@ The rest of the transient:
   -w  Worktree        [on]            s  Start / switch / resume
   -b  Base branch     (main)          e  Start, edit prompt before sending
   -c  Agent config    (Claude Code)   f  Finish (merge & done)…
-                                      k  Abandon…
+  -r  Rebase instead of merge         k  Abandon…
+  -t  Save the conversation
                                       d  Open worktree in dired
                                       m  Magit status of worktree
 #+end_example
@@ -296,9 +297,10 @@ and the =◐=/=○= glyph say enough.
 ** If the agent marks the task done anyway
 
 The skill tells it to, and the prompt is only one paragraph against that. When
-an agent-launched task becomes =done= while =agent-branch= is set and the
-branch is not merged, the status buffer shows it in the Done section with a
-warning glyph (=!=). =s s= on it then offers "Branch not merged: finish now?"
+an agent-launched task becomes =done= or =canceled= while its worktree still
+exists, the status buffer shows it with a warning glyph (=!=). The status
+buffer doesn't list closed tasks otherwise, so these get their own section,
+"Closed, worktree remains". =s s= on such a task offers "Finish it now?"
 instead of "reopen?". emacs-aven doesn't silently undo status changes.
 
 ** Finishing (=s f=)
@@ -312,11 +314,12 @@ instead of "reopen?". emacs-aven doesn't silently undo status changes.
 3. *Merge into the base branch in the main checkout,* after running
    =pre_merge= hooks. By default this creates a merge commit
    (=git merge --no-ff=), even when a fast-forward would be possible, so the
-   task's work stays visible as one unit in the history. The confirmation
-   step has a rebase option, =-r=, which instead rebases the branch onto the
-   base and fast-forwards, for a linear history. There is no squash option.
-   The default is a defcustom (=aven-agent-finish-strategy=, either =merge=
-   or =rebase=), so it isn't read from =.workmux.yaml='s =merge_strategy=.
+   task's work stays visible as one unit in the history. The =-r= switch in
+   the =s= menu instead rebases the branch onto the base and fast-forwards,
+   for a linear history. There is no squash option. The switch's default is
+   a defcustom (=aven-agent-finish-strategy=, either =merge= or =rebase=), so
+   it isn't read from =.workmux.yaml='s =merge_strategy=. The =pre_merge=
+   hooks run in the worktree.
    If the main checkout is not on the base branch or is dirty, refuse with a
    clear message and change nothing. If the rebase hits conflicts, abort it
    and tell the user to resolve them in the worktree, which leaves
@@ -341,15 +344,20 @@ unmerged commits, the user also chooses between "keep branch" (the default,
 recorded in a note) and "delete branch". The shell is killed, the worktree
 removed and the metadata cleared, and a note records what happened.
 
-*Saving the conversation* is opt-in. It's off by default, controlled by
-=aven-agent-save-transcript-on-abandon=, and can be turned on for a single
-abandon with a =-t= switch in the confirmation step. When on, emacs-aven
-copies agent-shell's transcript file to =aven-agent-transcript-directory=
-(named after the branch) before killing the shell. The note then records
-that path. The transcript itself doesn't go into Aven: notes would be
-unwieldy at that size, and Aven attachments only accept images. Reading the
-transcript file relies on agent-shell's private
-=agent-shell--transcript-file=, so check it when upgrading agent-shell.
+** Saving the conversation
+
+agent-shell writes its conversations to =.agent-shell/transcripts/= in the
+project it runs in, which here is the worktree. Removing the worktree deletes
+them, on Finish as well as Abandon. Saving them is opt-in, for both: it's off
+by default, controlled by =aven-agent-save-transcript=, and the =-t= switch in
+the =s= menu turns it on or off for one finish or abandon. When on, emacs-aven
+copies that directory to =aven-agent-transcript-directory=, in a directory
+named after the branch, before removing the worktree. The task's note then
+records that path. The conversation itself doesn't go into Aven: notes would
+be unwieldy at that size, and Aven attachments only accept images.
+
+The worktree's =.agent-shell/= directory doesn't count as uncommitted work
+when Finish or Abandon check for it.
 
 ** Status changed outside Emacs
 

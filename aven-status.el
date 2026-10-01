@@ -143,9 +143,19 @@ when possible."
   (interactive)
   (let* ((buf (get-buffer-create aven-status-buffer-name))
          (workspace (aven--current-workspace))
+         (agents (aven--agent-worktrees))
          (glyphs (mapcar (lambda (agent)
-                           (cons (car agent) (aven--agent-glyph (cdr agent))))
-                         (aven--agent-worktrees)))
+                           (cons (plist-get (car agent) :ref)
+                                 (aven--agent-glyph (cdr agent) (plist-get (car agent) :status))))
+                         agents))
+         ;; The status buffer doesn't list done and canceled tasks, but
+         ;; ones whose worktree remains still need finishing.
+         (leftovers (mapcar #'car
+                            (seq-filter (lambda (agent)
+                                          (and (aven--agent-closed-p (plist-get (car agent) :status))
+                                               (cdr agent)
+                                               (file-directory-p (cdr agent))))
+                                        agents)))
          (groups (mapcar (lambda (group)
                            (cons (car group)
                                  (apply #'aven--list-json
@@ -171,7 +181,8 @@ when possible."
             (insert "\n"))
           (magit-insert-section (aven-status)
             (dolist (group groups)
-              (aven--insert-task-section (car group) nil (cdr group) glyphs)))
+              (aven--insert-task-section (car group) nil (cdr group) glyphs))
+            (aven--insert-task-section "Closed, worktree remains" nil leftovers glyphs))
           (when (eq (point-min) (point-max))
             (insert (propertize "No tasks.\n" 'font-lock-face 'shadow)))
           (let ((magit-section-cache-visibility nil))

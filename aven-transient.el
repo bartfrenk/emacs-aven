@@ -249,7 +249,11 @@ its ref under :ref.")
    (t "Start agent")))
 
 (transient-define-prefix aven--agent-menu ()
-  "Start, switch to or resume an agent on an Aven task."
+  "Start, switch to, resume, finish or abandon an agent on an Aven task."
+  :init-value (lambda (obj)
+                (oset obj value
+                      (append (when (eq aven-agent-finish-strategy 'rebase) '("--rebase"))
+                              (when aven-agent-save-transcript '("--save-conversation")))))
   [:description aven--agent-menu-heading
    ["Options"
     ("-b" "Base branch" "--base="
@@ -257,11 +261,15 @@ its ref under :ref.")
     ("-c" "Agent config" "--config="
      :if-not (lambda () (plist-get aven--agent-menu-state :shell))
      :reader (lambda (prompt initial history)
-               (completing-read prompt (aven--agent-config-names) nil t initial history)))]
+               (completing-read prompt (aven--agent-config-names) nil t initial history)))
+    ("-r" "Rebase instead of merge" "--rebase" :if aven--agent-menu-worktree)
+    ("-t" "Save the conversation" "--save-conversation" :if aven--agent-menu-worktree)]
    ["Actions"
     ("s" aven--agent-menu-start :description aven--agent-menu-start-description)
     ("e" "Start, editing the first message" aven--agent-menu-start-edit
      :if-not aven--agent-menu-worktree)
+    ("f" "Finish (merge and done)..." aven--agent-menu-finish :if aven--agent-menu-worktree)
+    ("k" "Abandon..." aven--agent-menu-abandon :if aven--agent-menu-worktree)
     ("d" "Worktree in dired" aven--agent-menu-dired :if aven--agent-menu-worktree)
     ("m" "Worktree in magit" aven--agent-menu-magit :if aven--agent-menu-worktree)]])
 
@@ -279,6 +287,17 @@ its ref under :ref.")
 (defun aven--agent-menu-start-edit (&optional args)
   (interactive (list (transient-args 'aven--agent-menu)))
   (aven--agent-menu-run args t))
+
+(defun aven--agent-menu-finish (&optional args)
+  (interactive (list (transient-args 'aven--agent-menu)))
+  (aven-agent-finish (plist-get aven--agent-menu-state :ref)
+                     :rebase (and (member "--rebase" args) t)
+                     :save-transcript (and (member "--save-conversation" args) t)))
+
+(defun aven--agent-menu-abandon (&optional args)
+  (interactive (list (transient-args 'aven--agent-menu)))
+  (aven-agent-abandon (plist-get aven--agent-menu-state :ref)
+                      :save-transcript (and (member "--save-conversation" args) t)))
 
 (defun aven--agent-menu-dired ()
   (interactive)

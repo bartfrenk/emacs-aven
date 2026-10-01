@@ -15,6 +15,9 @@
 ;;   agent-base      the branch the worktree was created from
 ;;   agent-session   the agent-shell session id, to resume it
 ;;
+;; Finishing a task merges its branch and marks it done; abandoning it
+;; sets it back to todo or cancels it.  Both remove the worktree.
+;;
 ;; agent-shell is only loaded once an agent is started.
 ;;
 ;; See docs/features/agent-shell.org for the design.
@@ -39,6 +42,7 @@
 (declare-function agent-shell--resolved-agent-configs "agent-shell")
 (declare-function agent-shell--insert-to-shell-buffer "agent-shell")
 (declare-function magit-log-other "magit-log")
+(declare-function magit-status "magit-status")
 (defvar agent-shell--state)
 
 (defcustom aven-agent-branch-prefix "ag--"
@@ -95,16 +99,17 @@ metadata linking it to a worktree (:branch, :worktree, :base and
                           (file-truename (buffer-local-value 'default-directory buffer)))))
                 (agent-shell-buffers)))))
 
-(defun aven--agent-forget (ref state)
-  "Remove the metadata linking REF to a worktree, as found in STATE.
-Only keys REF has are removed: aven rejects removing a key that was
-never assigned in the workspace."
-  (when-let* ((args (delq nil
-                          (mapcar (lambda (key)
-                                    (when (plist-get state key)
-                                      (format "--remove-metadata=agent-%s"
-                                              (substring (symbol-name key) 1))))
-                                  '(:branch :worktree :base :session)))))
+(defun aven--agent-forget (ref state &rest edit-args)
+  "Remove the metadata linking REF to a worktree, as found in STATE,
+in one `aven edit' with EDIT-ARGS.  Only keys REF has are removed:
+aven rejects removing a key that was never assigned in the workspace."
+  (when-let* ((args (append edit-args
+                            (delq nil
+                                  (mapcar (lambda (key)
+                                            (when (plist-get state key)
+                                              (format "--remove-metadata=agent-%s"
+                                                      (substring (symbol-name key) 1))))
+                                          '(:branch :worktree :base :session))))))
     (apply #'aven--run-quietly "edit" ref args)))
 
 ;;; Display
@@ -117,39 +122,46 @@ never assigned in the workspace."
   "Face for the glyph of a task whose worktree has no agent running."
   :group 'aven)
 
+(defface aven-agent-leftover-face '((t :inherit warning))
+  "Face for the glyph of a done or canceled task whose worktree remains."
+  :group 'aven)
+
 (defun aven--agent-worktrees ()
-  "Alist of (REF . WORKTREE) for every task linked to a worktree."
+  "List of (TASK . WORKTREE) for every task linked to a worktree, where
+TASK is the task as `aven list' reports it."
   ;; aven rejects filtering on a key that no task in the workspace has
   ;; ever had, so check that one has first.
   (when (member "agent-worktree" (aven--metadata-keys))
     (mapcar (lambda (task)
-              (let ((ref (plist-get task :ref)))
-                (cons ref (plist-get (plist-get (aven--task-full-json ref) :metadata)
-                                     :agent-worktree))))
+              (cons task (plist-get (plist-get (aven--task-full-json (plist-get task :ref))
+                                               :metadata)
+                                    :agent-worktree)))
             (aven--list-json "--has-metadata=agent-worktree"))))
 
-(defun aven--agent-glyph (worktree)
-  "Glyph for an agent in WORKTREE: ● when an agent-shell is running
-there, ○ when none is, and nil when WORKTREE is nil or gone."
+(defun aven--agent-closed-p (status)
+  (member status '("done" "canceled")))
+
+(defun aven--agent-glyph (worktree &optional status)
+  "Glyph for an agent in WORKTREE, for a task with STATUS: ! when the
+task is done or canceled, ● when an agent-shell is running there, ○
+when none is, and nil when WORKTREE is nil or gone."
   (when (and worktree (file-directory-p worktree))
-    (if (aven--agent-shell-buffer-for worktree)
-        (propertize "●" 'font-lock-face 'aven-agent-running-face 'help-echo "Agent running")
-      (propertize "○" 'font-lock-face 'aven-agent-parked-face 'help-echo "No agent running"))))
+    (cond
+     ((aven--agent-closed-p status)
+      (propertize "!" 'font-lock-face 'aven-agent-leftover-face
+                  'help-echo (format "Task is %s, but its worktree remains" status)))
+     ((aven--agent-shell-buffer-for worktree)
+      (propertize "●" 'font-lock-face 'aven-agent-running-face 'help-echo "Agent running"))
+     (t
+      (propertize "○" 'font-lock-face 'aven-agent-parked-face 'help-echo "No agent running")))))
 
 (defun aven--agent-branch-summary (worktree base)
   "How the branch checked out in WORKTREE compares with BASE, such as
 \"3 commits ahead of main, clean\"."
-  (let ((ahead (and base (aven--worktree-git worktree "rev-list" "--count"
-                                             (concat base "..HEAD"))))
-        (status (aven--worktree-git worktree "status" "--porcelain")))
-    (string-join
-     (delq nil
-           (list (when (and ahead (zerop (car ahead)))
-                   (let ((n (string-to-number (cdr ahead))))
-                     (format "%d commit%s ahead of %s" n (if (= n 1) "" "s") base)))
-                 (when (zerop (car status))
-                   (if (string-empty-p (cdr status)) "clean" "uncommitted changes"))))
-     ", ")))
+  (concat (when base
+            (let ((n (aven--worktree-commits-ahead worktree base)))
+              (format "%d commit%s ahead of %s, " n (if (= n 1) "" "s") base)))
+          (if (aven--worktree-dirty-p worktree) "uncommitted changes" "clean")))
 
 (defun aven--agent-insert-button (label action)
   (insert-text-button label
@@ -159,9 +171,9 @@ there, ○ when none is, and nil when WORKTREE is nil or gone."
                       ;; Font-lock would strip a plain `face'.
                       'font-lock-face 'link))
 
-(defun aven--insert-agent-section (metadata)
-  "Insert the Agent section of a task buffer, for a task with METADATA,
-or nothing when the task has no worktree."
+(defun aven--insert-agent-section (metadata status)
+  "Insert the Agent section of a task buffer, for a task with METADATA
+and STATUS, or nothing when the task has no worktree."
   (let ((branch (plist-get metadata :agent-branch))
         (worktree (plist-get metadata :agent-worktree))
         (base (plist-get metadata :agent-base))
@@ -190,7 +202,7 @@ or nothing when the task has no worktree."
                                      (lambda () (dired worktree)))
           (insert "\n")
           (funcall label "agent")
-          (insert (aven--agent-glyph worktree) " ")
+          (insert (aven--agent-glyph worktree status) " ")
           (if shell
               (aven--agent-insert-button (buffer-name shell)
                                          (lambda () (pop-to-buffer shell)))
@@ -336,6 +348,11 @@ name of a new worktree instead of using the default."
       (message "aven: worktree %s is gone; starting afresh" worktree)
       (aven--agent-forget ref state)
       (setq worktree nil))
+    (when (and worktree (aven--agent-closed-p (plist-get task :status)))
+      (if (y-or-n-p (format "%s is %s, but its worktree remains.  Finish it now? "
+                            ref (plist-get task :status)))
+          (aven-agent-finish ref)
+        (user-error "aven: cancelled")))
     (cond
      ((and worktree (plist-get state :shell))
       (pop-to-buffer (plist-get state :shell)))
@@ -388,6 +405,220 @@ agent-shell in it.  See `aven-agent-start-or-switch'."
                               :config config
                               :edit edit
                               :prompt (aven--agent-prompt ref task branch base nil)))))
+
+;;; Finishing and abandoning
+
+(defcustom aven-agent-finish-strategy 'merge
+  "How finishing a task brings its branch into the base branch: `merge'
+makes a merge commit, `rebase' rebases the branch onto the base branch
+and fast-forwards."
+  :type '(choice (const merge) (const rebase))
+  :group 'aven)
+
+(defcustom aven-agent-save-transcript nil
+  "Whether finishing or abandoning a task saves its agent's conversation
+to `aven-agent-transcript-directory' before removing its worktree."
+  :type 'boolean
+  :group 'aven)
+
+(defcustom aven-agent-transcript-directory
+  (locate-user-emacs-file "aven-transcripts/")
+  "Where conversations are saved when a task's worktree is removed."
+  :type 'directory
+  :group 'aven)
+
+(defun aven--agent-worktree-state (ref)
+  "REF's agent state, signalling an error when REF has no worktree."
+  (let* ((state (aven--agent-state ref))
+         (worktree (plist-get state :worktree)))
+    (unless (and worktree (file-directory-p worktree))
+      (user-error "aven: %s has no worktree" ref))
+    (unless (plist-get state :base)
+      (setq state (plist-put state :base
+                             (aven--worktree-main-branch
+                              (aven--worktree-main-checkout worktree)
+                              (aven--workmux-config
+                               (aven--worktree-main-checkout worktree))))))
+    state))
+
+(defun aven--agent-save-transcripts (worktree branch)
+  "Copy agent-shell's conversation files out of WORKTREE, into a
+directory named after BRANCH in `aven-agent-transcript-directory'.
+Returns that directory, or nil when there was nothing to copy."
+  (let ((source (expand-file-name ".agent-shell/transcripts" worktree)))
+    (when (and (file-directory-p source)
+               (directory-files source nil "\\`[^.]"))
+      (let ((dest (expand-file-name (replace-regexp-in-string "/" "-" branch t t)
+                                    aven-agent-transcript-directory)))
+        (make-directory dest t)
+        (dolist (file (directory-files source t "\\`[^.]"))
+          (copy-file file (expand-file-name (file-name-nondirectory file) dest) t))
+        dest))))
+
+(cl-defun aven--agent-close (ref state &key status note save-transcript delete-branch force)
+  "Remove REF's worktree as found in STATE, set REF's status to STATUS
+and add NOTE.  SAVE-TRANSCRIPT saves the agent's conversation first;
+DELETE-BRANCH and FORCE are passed to `aven--worktree-remove'."
+  (let* ((worktree (plist-get state :worktree))
+         (saved (and save-transcript
+                     (aven--agent-save-transcripts worktree (plist-get state :branch)))))
+    (when-let* ((shell (aven--agent-shell-buffer-for worktree)))
+      (let ((kill-buffer-query-functions nil))
+        (kill-buffer shell)))
+    (aven--worktree-remove :worktree worktree :branch (plist-get state :branch)
+                           :delete-branch delete-branch :force force)
+    (aven--agent-forget ref state (concat "--status=" status))
+    (aven--run-quietly "note" ref
+                       (if saved
+                           (format "%s Conversation saved to %s." note
+                                   (abbreviate-file-name saved))
+                         note))))
+
+;;;; Finishing
+
+(defvar-local aven--agent-finish-args nil
+  "The task ref, state and options of the task a finish buffer is for.")
+
+(defvar aven-agent-finish-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "C-c C-c") #'aven-agent-finish-confirm)
+    (define-key map (kbd "C-c C-k") #'aven-agent-finish-cancel)
+    map))
+
+(define-derived-mode aven-agent-finish-mode special-mode "Aven-Finish"
+  "Major mode for reviewing a task's branch before merging it.
+\\<aven-agent-finish-mode-map>\\[aven-agent-finish-confirm] merges, \\[aven-agent-finish-cancel] cancels.")
+
+(with-eval-after-load 'evil
+  (evil-set-initial-state 'aven-agent-finish-mode 'motion))
+
+(cl-defun aven-agent-finish (ref &key (rebase (eq aven-agent-finish-strategy 'rebase))
+                                 (save-transcript aven-agent-save-transcript))
+  "Finish the agent's work on REF: show what its branch would bring
+into its base branch, and on confirmation merge it (with REBASE,
+rebase and fast-forward instead), remove the worktree and branch, and
+mark REF done.  SAVE-TRANSCRIPT saves the agent's conversation first."
+  (let* ((state (aven--agent-worktree-state ref))
+         (worktree (plist-get state :worktree))
+         (base (plist-get state :base)))
+    (when (aven--worktree-dirty-p worktree)
+      (when (y-or-n-p "The worktree has uncommitted changes.  Open it in magit? ")
+        (require 'magit)
+        (magit-status worktree))
+      (user-error "aven: commit or discard the changes in %s first" worktree))
+    (if (zerop (aven--worktree-commits-ahead worktree base))
+        (if (y-or-n-p (format "%s has no commits ahead of %s.  Mark %s done and clean up anyway? "
+                              (plist-get state :branch) base ref))
+            (aven--agent-close ref state
+                               :status "done"
+                               :note (format "Closed without merging: %s had no commits ahead of %s."
+                                             (plist-get state :branch) base)
+                               :save-transcript save-transcript
+                               :delete-branch t)
+          (user-error "aven: cancelled"))
+      (aven--agent-show-finish ref state rebase save-transcript))))
+
+(defun aven--agent-show-finish (ref state rebase save-transcript)
+  "Show what finishing REF, with STATE, would merge, for confirmation."
+  (let* ((worktree (plist-get state :worktree))
+         (branch (plist-get state :branch))
+         (base (plist-get state :base))
+         (task (plist-get state :task))
+         (notes (plist-get (aven--task-full-json ref) :notes))
+         (buf (get-buffer-create (format "*aven-finish: %s*" ref))))
+    (with-current-buffer buf
+      (aven-agent-finish-mode)
+      (setq aven--agent-finish-args (list ref state rebase save-transcript))
+      (let ((inhibit-read-only t)
+            (heading (lambda (text) (insert (propertize text 'font-lock-face 'bold) "\n"))))
+        (erase-buffer)
+        (insert (propertize (format "Finish %s: %s" ref (plist-get task :title))
+                            'font-lock-face 'bold)
+                "\n\n"
+                (if rebase
+                    (format "Rebase %s onto %s and fast-forward %s, then remove the worktree and branch and mark %s done."
+                            branch base base ref)
+                  (format "Merge %s into %s with a merge commit, then remove the worktree and branch and mark %s done."
+                          branch base ref))
+                (if save-transcript "  Save the conversation first." "")
+                "\n\n")
+        (funcall heading "Commits")
+        (insert (aven--worktree-git-or-error worktree "log" "--oneline" (concat base "..HEAD"))
+                "\n\n")
+        (funcall heading "Changes")
+        (insert (aven--worktree-git-or-error worktree "diff" "--stat" (concat base "...HEAD"))
+                "\n\n")
+        (when notes
+          (funcall heading "Latest note")
+          (aven--insert-text (plist-get (car (last notes)) :body))
+          (insert "\n\n"))
+        (insert (propertize (substitute-command-keys
+                             "\\<aven-agent-finish-mode-map>\\[aven-agent-finish-confirm] finish, \\[aven-agent-finish-cancel] cancel")
+                            'font-lock-face 'shadow)
+                "\n")
+        (goto-char (point-min))))
+    (pop-to-buffer buf)))
+
+(defun aven-agent-finish-confirm ()
+  "Merge the branch this buffer shows and close its task."
+  (interactive)
+  (pcase-let ((`(,ref ,state ,rebase ,save-transcript) aven--agent-finish-args))
+    (let* ((branch (plist-get state :branch))
+           (base (plist-get state :base))
+           (commit (aven--worktree-merge :worktree (plist-get state :worktree)
+                                         :branch branch :base base :rebase rebase)))
+      (quit-window t)
+      (aven--agent-close ref state
+                         :status "done"
+                         :note (format "Merged %s into %s (%s)." branch base commit)
+                         :save-transcript save-transcript
+                         :delete-branch t)
+      (message "aven: merged %s into %s and marked %s done" branch base ref))))
+
+(defun aven-agent-finish-cancel ()
+  "Close this buffer without finishing."
+  (interactive)
+  (quit-window t))
+
+;;;; Abandoning
+
+(cl-defun aven-agent-abandon (ref &key (save-transcript aven-agent-save-transcript))
+  "Stop the agent's work on REF: remove its worktree, and set REF back
+to todo or cancel it.  When the branch has commits, ask whether to keep
+it.  SAVE-TRANSCRIPT saves the agent's conversation first."
+  (let* ((state (aven--agent-worktree-state ref))
+         (worktree (plist-get state :worktree))
+         (branch (plist-get state :branch))
+         (ahead (aven--worktree-commits-ahead worktree (plist-get state :base)))
+         (status (pcase (car (read-multiple-choice
+                              (format "Abandon %s" ref)
+                              '((?t "todo" "Remove the worktree and set the task back to todo")
+                                (?c "cancel" "Remove the worktree and cancel the task")
+                                (?q "quit" "Do nothing"))))
+                   (?t "todo")
+                   (?c "canceled")
+                   (_ (user-error "aven: cancelled")))))
+    (when (and (aven--worktree-dirty-p worktree)
+               (not (y-or-n-p "The worktree has uncommitted changes, which will be lost.  Continue? ")))
+      (user-error "aven: cancelled"))
+    (let ((keep (and (> ahead 0)
+                     (eq ?k (car (read-multiple-choice
+                                  (format "%s has %d unmerged commit%s" branch ahead
+                                          (if (= ahead 1) "" "s"))
+                                  '((?k "keep branch" "Keep the branch and its commits")
+                                    (?d "delete branch" "Delete the branch and its commits"))))))))
+      (aven--agent-close ref state
+                         :status status
+                         :note (cond
+                                (keep (format "Abandoned the agent's work; kept branch %s with %d unmerged commit%s."
+                                              branch ahead (if (= ahead 1) "" "s")))
+                                ((> ahead 0) (format "Abandoned the agent's work; deleted branch %s and its %d commit%s."
+                                                     branch ahead (if (= ahead 1) "" "s")))
+                                (t "Abandoned the agent's work; it had no commits."))
+                         :save-transcript save-transcript
+                         :delete-branch (not keep)
+                         :force t)
+      (message "aven: removed the worktree of %s and set it to %s" ref status))))
 
 (provide 'aven-agent)
 ;;; aven-agent.el ends here
