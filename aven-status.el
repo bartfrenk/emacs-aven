@@ -146,7 +146,7 @@ when possible."
   (evil-define-key 'motion aven-status-mode-map
     (kbd "RET") #'aven-status-visit-task-or-toggle
     "g" #'aven-status-refresh
-    "l" #'aven/list
+    "L" #'aven/list
     "s" #'aven/search
     "w" #'aven/show
     "c" #'aven/context

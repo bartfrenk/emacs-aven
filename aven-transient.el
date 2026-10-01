@@ -253,7 +253,7 @@ buffer."
   "Transient interface to the Aven CLI."
   ["Aven"
    ["Query"
-    ("l" "List"    aven/list)
+    ("L" "List"    aven/list)
     ("s" "Search"  aven/search)
     ("w" "Show"    aven/show)
     ("c" "Context" aven/context)]
