@@ -51,9 +51,11 @@
   (aven-status-refresh))
 
 (defun aven/context ()
-  "Show a context snapshot for a task."
+  "Show a context snapshot for the task at point, or a prompted one,
+and select its window."
   (interactive)
-  (aven--run "context" (aven--read-ref "Context for: ")))
+  (aven--run "context" (or (aven--ref-at-point) (aven--read-ref "Context for: ")))
+  (pop-to-buffer "*aven*"))
 
 (transient-define-prefix aven/add ()
   "Create an Aven task."
