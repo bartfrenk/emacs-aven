@@ -109,6 +109,12 @@ When HIDE is non-nil, the section starts folded."
 (with-eval-after-load 'evil
   (evil-set-initial-state 'aven-status-mode 'motion))
 
+;; evil-snipe's local map takes precedence over the status buffer's
+;; own evil bindings, so it would shadow f (filter).
+(defvar evil-snipe-disabled-modes)
+(with-eval-after-load 'evil-snipe
+  (add-to-list 'evil-snipe-disabled-modes 'aven-status-mode))
+
 (defun aven-status-visit-task-or-toggle ()
   "Show the task at point in a dedicated buffer, or toggle the section."
   (interactive)
