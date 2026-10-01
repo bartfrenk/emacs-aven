@@ -1,0 +1,441 @@
+#+title: Working on Aven tasks with agent-shell
+#+date: 2026-10-01
+
+* Goal
+
+From the Aven status buffer or a task buffer, one key starts a coding agent on
+the task at point. The agent runs in Emacs (an [[https://github.com/xenodium/agent-shell][agent-shell]] buffer) in its own
+git worktree. It starts with the task's context, and the task's status follows
+the work from start to merge without manual bookkeeping.
+
+This document covers the UX: what the user sees and presses, and which
+component owns which state change. It deliberately leaves out implementation
+detail, which the earlier =spawn-agent-shell= branch already explored (see
+[[*Relation to earlier work][Relation to earlier work]]).
+
+* How Aven itself approaches agents
+
+Aven is by the author of workmux, and both tools are built to be composed. Aven
+does not launch agents or manage worktrees. Its contract has four parts:
+
+- *Launching is delegated.* The TUI's experimental [[https://github.com/raine/aven/blob/main/docs/src/content/docs/custom-commands.md][custom commands]]
+  (=tui.commands= in =config.yaml=) run a user-configured program with a
+  versioned JSON document describing the focused or marked tasks. The
+  documented example dispatches a task to a tmux window. Aven doesn't know
+  what that program does.
+- *Context comes from the session, not the launcher.* =aven prime= runs from
+  a =SessionStart= hook and gives the agent the Aven skill plus the project's
+  active, ready and blocked work. The project is inferred from the working
+  directory, which also works inside worktrees. This session was primed
+  that way.
+- *The agent owns the status of its own work.* The skill tells the agent:
+  mark the task =active= when it starts, append *notes* for decisions,
+  blockers and partial progress, and mark it =done= "only after the
+  requested work is complete and required code changes are committed".
+  =canceled= is only for when the user says so.
+- *Refs stay local.* "Keep task refs out of commit messages, PR descriptions,
+  and external systems."
+
+What this means for emacs-aven:
+
+1. emacs-aven plays the role of a custom command: it's the launcher. It
+   should add what a launcher can add (a worktree, a ready shell, the task's
+   context in the first message) and not take over what the skill already
+   gives the agent.
+2. The skill's =done= rule is written for an agent working in the main
+   checkout, where "committed" means the work landed. In a worktree,
+   "committed" only means "committed on a side branch", and nobody has
+   reviewed or merged it yet. This plan changes that one rule for agents it
+   launches; see [[*Status transitions][Status transitions]].
+3. Branch and worktree names must not contain the task ref, because branches
+   get pushed. The link between task and worktree goes in task *metadata*,
+   which stays local.
+4. The same entry point should be reachable from the Aven TUI through a
+   custom command; see [[*Launching from the Aven TUI][Launching from the Aven TUI]].
+
+* The lifecycle at a glance
+
+#+begin_example
+ inbox/backlog/todo                 active                              done
+ ───────────────────┐  ┌──────────────────────────────────────┐  ┌────────────
+                    │  │                                      │  │
+   [s] Start agent ─┼─►│ running ◄──► waiting ──► ready for   ├─►│ [s f] Finish:
+                    │  │   ●            ◐         review ✓    │  │ merge, remove
+                    │  │        ▲                    │        │  │ worktree, done
+                    │  │        └── [s] resume ◄── idle ○ ◄───┤  │
+                    │  │            (shell gone, worktree     │  │
+                    │  │             still there)             │  │
+                    │  └───────────────┬──────────────────────┘  │
+                    │                  │ [s k] Abandon           │
+                    ◄──────────────────┘ worktree removed,       │
+                       back to todo (or canceled on request)
+#+end_example
+
+The Aven =status= field only changes at the edges: on start, finish and
+abandon. Everything inside =active= is /agent state/, which emacs-aven derives
+from live agent-shell buffers and shows as a glyph. Aven's status vocabulary
+(=inbox backlog todo active done canceled=) has no "in review" status, and we
+should not try to create one.
+
+* Starting an agent
+
+** Entry point
+
+=s= ("start" or "session") in =aven-status-mode= and =aven-task-mode=, and an
+"Agent" group in =aven/dispatch=. =s= is currently unbound in both maps.
+
+=s= opens a small transient, =aven/agent=. Its default action, =s= again, does
+whatever makes sense for the task at point, so the common case is =s s=:
+
+| Task state                              | =s s= does                                          |
+|-----------------------------------------+-----------------------------------------------------|
+| No worktree recorded                    | Start: create worktree, start shell, send prompt    |
+| Worktree exists, live shell             | Switch to that shell (nothing is sent)              |
+| Worktree exists, no shell               | Resume: start a shell there, resuming the last      |
+|                                         | session if possible, otherwise a short re-brief     |
+| Task is =done= or =canceled=            | Ask "Reopen EA-XXXX and start an agent?"            |
+| Task is an epic                         | Refuse: "Start an agent on a child task instead"    |
+| Task has unresolved dependencies        | Warn and ask; don't refuse (the user may know more) |
+
+The rest of the transient:
+
+#+begin_example
+ Agent: EA-KJMW Kick off agent-shell on aven tasks
+ Start options                       Actions
+  -w  Worktree        [on]            s  Start / switch / resume
+  -b  Base branch     (main)          e  Start, edit prompt before sending
+  -c  Agent config    (Claude Code)   f  Finish (merge & done)…
+  -n  Branch name     (slug)          k  Abandon…
+                                      d  Open worktree in dired
+                                      m  Magit status of worktree
+#+end_example
+
+Actions that need an existing worktree are hidden when there is none, the same
+way the dispatch menu hides the status filter.
+
+** What happens on start
+
+1. *Resolve the project root.* Use the existing =aven project path= mapping.
+   If the project has no mapping, prompt once and save the answer with
+   =aven project path add=. Cancelling here leaves no trace.
+2. *Choose the branch name.* The default is =ag--= followed by a slug of the
+   task title shortened to about 4 words (for this task:
+   =ag--kick-off-agent-shell=). The minibuffer shows the full name,
+   prefix included, pre-filled so that any of it can be edited, the prefix
+   too. Whatever the user confirms is used as is, and Aven finds the task's
+   branch through =agent-branch= metadata, never through the prefix. The
+   worktree directory gets the same name. The default prefix
+   contains no =/=, so it fits the =.workmux/<name>= directory layout. It
+   also makes agent branches easy to spot in =git branch=, Magit and
+   =workmux list=. The task ref is never part of the name; see
+   [[*How Aven itself approaches agents][point 3 above]]. The prefix is a
+   defcustom, =aven-agent-branch-prefix=.
+3. *Create the worktree* under the configured worktree directory, honoring the
+   project's =.workmux.yaml= for base branch, file copy/symlink and
+   =post_create= hooks, without running the =workmux= binary or tmux. Hook
+   output goes to a buffer that only pops up on failure. Worktrees created
+   this way look the same as ones created by =workmux add=, so =workmux list=
+   and =workmux merge= still work on them.
+4. *Record the link on the task* as metadata:
+   - =agent-branch= :: the branch name; this is the authoritative link
+   - =agent-worktree= :: the absolute worktree path
+   - =agent-session= :: the agent-shell session id, written once the session
+     exists, so the session can be resumed after Emacs restarts
+   - =agent-state= :: set to =review= by the agent when it considers the
+     work ready; see [[*Agent state while active][Agent state while active]]
+5. *Mark the task =active=* (skip if it already is). This happens before the
+   shell starts, so the status buffer shows the task as active immediately,
+   even though the agent would do it too.
+6. *Start agent-shell* in the worktree and send the opening prompt (below).
+   With =e=, the prompt goes into the shell's input without being submitted,
+   so the user can add to it first. This replaces the "Anything else for the
+   agent?" minibuffer prompt from the earlier design, since a full buffer is
+   a better place to write.
+7. *Show the shell* in another window. Point stays on the task in the status
+   buffer, so starting several agents in a row is quick.
+
+If any step fails, everything before it is left in place, and the next =s s=
+picks up from there. For example, if a hook fails after the worktree is
+created, the task is already =active= and has an =agent-branch=, so =s s=
+resumes. That is the reason for writing the metadata in step 4, before the
+shell starts.
+
+** The opening prompt
+
+The =SessionStart= hook already runs =aven prime=, so the prompt doesn't
+repeat the skill. The prompt contains:
+
+#+begin_example
+Work on EA-KJMW: Kick off agent-shell on aven tasks.
+
+<output of `aven context EA-KJMW`>
+
+You are in a dedicated git worktree on branch `ag--kick-off-agent-shell`,
+branched from `main`. Commit your work on this branch.
+
+When the work is complete and committed: leave an `aven note` summarizing
+what changed and how you verified it, then run
+`aven edit EA-KJMW --metadata agent-state=review` and stop. Do NOT mark the
+task done; it is marked done when the branch is merged. If you get blocked,
+leave a note explaining why and stop without setting agent-state.
+#+end_example
+
+Embedding =aven context= saves the agent one tool call and puts what it was
+told in the user's scrollback. The last paragraph replaces the skill's =done=
+rule; see [[*Status transitions][Status transitions]].
+
+Put the template in a defcustom (=aven-agent-prompt-function= or a format
+string), since the wording will need tuning.
+
+** Without a worktree
+
+Turning =-w= off runs the agent in the project root, with no branch, no merge
+and no worktree metadata. This is for non-code projects (=gtd=, notes) and
+small fixes. In this mode the agent keeps the skill's normal rules and marks
+the task =done= itself, because there is no merge step afterwards.
+
+The default for =-w= is a per-project setting (=aven-agent-worktree-projects=,
+or simply "on when the project root is a git repo").
+
+* Agent state while active
+
+** Status buffer
+
+Tasks with an agent get a glyph before the title:
+
+| Glyph | Meaning          | Derived from                                            |
+|-------+------------------+---------------------------------------------------------|
+| =●=   | running          | live shell, turn in progress                            |
+| =◐=   | needs you        | live shell with a pending permission request, or idle   |
+|       |                  | after a turn, without =agent-state=review=              |
+| =✓=   | ready for review | =agent-state=review= metadata on the task               |
+| =○=   | parked           | worktree exists, no live shell                          |
+
+=●=, =◐= and =○= come from local Emacs state: agent-shell buffers and their
+=turn-complete=, =permission-request= and =clean-up= events, plus
+=agent-branch= metadata. They are not stored in Aven. The status buffer
+refreshes on those events, debounced to at most once per second.
+
+=✓= is different: the agent sets it explicitly, as the =agent-state=review=
+metadata flag, as the last step of the opening prompt's instructions.
+Because it is stored in Aven, it survives Emacs restarts, syncs, and is
+visible in the Aven TUI and to =aven list --metadata agent-state=review=.
+=✓= takes precedence over =○=: a parked task that is ready for review shows
+=✓=.
+
+The flag goes stale when work resumes after review, for example when the user
+asks the agent for changes. emacs-aven clears it (=--remove-metadata
+agent-state=) as soon as that shell shows activity again: the first
+=tool-call-update= or =agent-message-chunk= event after a =turn-complete=,
+while the flag is set. The prompt instructions stay in the conversation, so
+the agent sets the flag again when it is done. Finish and Abandon remove it
+along with the other =agent-*= metadata.
+
+=aven-status= could also gain a "Agents" filter that shows only tasks with
+=agent-branch=. That makes it a small dashboard, similar to =workmux
+dashboard=.
+
+** Task buffer
+
+An "Agent" section between the description and the notes:
+
+#+begin_example
+Agent
+  Branch    ag--kick-off-agent-shell  (3 commits ahead of main, clean)
+  Worktree  ~/code/projects/emacs-aven/.workmux/ag--kick-off-agent-shell
+  Shell     *agent-shell: Claude Code @ ag--kick-off-agent-shell*  ● running
+#+end_example
+
+Each line is a button: the branch opens =magit-log= for =main..branch=, the
+worktree opens dired, and the shell switches to the shell buffer. This section
+is where the user reviews the work before finishing.
+
+** From the shell buffer
+
+The shell buffer knows its task through the worktree path, so =aven/agent=
+also works from inside it. Adding =C-c C-a= (or the evil equivalent) in
+=agent-shell-mode= buffers that belong to a task lets the user finish or
+abandon without going back to the status buffer.
+
+* Status transitions
+
+** Who changes what
+
+| Transition                    | Trigger                      | Done by    |
+|-------------------------------+------------------------------+------------|
+| inbox/backlog/todo → active   | =s s= start                  | emacs-aven |
+| done/canceled → active        | =s s= after confirming       | emacs-aven |
+|                               | "reopen?"                    |            |
+| (active, adds notes)          | progress, blockers, finished | agent      |
+| (active, sets review flag)    | work ready for review        | agent      |
+| (active, clears review flag)  | shell active again           | emacs-aven |
+| active → done                 | =s f= finish (merge)         | emacs-aven |
+| active → done (no worktree)   | work committed               | agent, per |
+|                               |                              | the skill  |
+| active → todo                 | =s k= abandon                | emacs-aven |
+| active → canceled             | =s k=, choose "cancel task"  | emacs-aven |
+
+*Why the agent doesn't mark worktree tasks done:* in a worktree, "done" has to
+mean "merged". Otherwise a task marked =done= has its code on an unmerged
+branch, and the =Done= column of the status buffer no longer reflects reality.
+Merging is the user's review step, so it's also the right moment for =done=.
+
+*Why the agent doesn't flip the task back to todo when it gets blocked:* the
+worktree and branch still exist, so the task is still in progress. The note
+and the =◐=/=○= glyph say enough.
+
+** If the agent marks the task done anyway
+
+The skill tells it to, and the prompt is only one paragraph against that. When
+an agent-launched task becomes =done= while =agent-branch= is set and the
+branch is not merged, the status buffer shows it in the Done section with a
+warning glyph (=!=). =s s= on it then offers "Branch not merged: finish now?"
+instead of "reopen?". emacs-aven doesn't silently undo status changes.
+
+** Finishing (=s f=)
+
+1. *Check preconditions.* The worktree must be clean; if not, offer to open
+   =magit-status= there and stop. The branch must be ahead of its base; if
+   not, offer "Nothing to merge: mark done and clean up anyway?".
+2. *Show what will be merged.* A summary buffer, or simply =magit-log=
+   =base..branch=, together with the agent's latest note. The user confirms
+   with =C-c C-c= or cancels with =C-c C-k=.
+3. *Merge into the base branch in the main checkout,* after running
+   =pre_merge= hooks. By default this creates a merge commit
+   (=git merge --no-ff=), even when a fast-forward would be possible, so the
+   task's work stays visible as one unit in the history. The confirmation
+   step has a rebase option, =-r=, which instead rebases the branch onto the
+   base and fast-forwards, for a linear history. There is no squash option.
+   The default is a defcustom (=aven-agent-finish-strategy=, either =merge=
+   or =rebase=), so it isn't read from =.workmux.yaml='s =merge_strategy=.
+   If the main checkout is not on the base branch or is dirty, refuse with a
+   clear message and change nothing. If the rebase hits conflicts, abort it
+   and tell the user to resolve them in the worktree, which leaves
+   everything as it was.
+4. *Clean up.* Kill the shell buffer, remove the worktree (after =pre_remove=
+   hooks), delete the branch, and remove the =agent-*= metadata.
+5. *Update the task.* Set =done= and add a note: =Merged ag--kick-off-agent-shell
+   into main (abc1234).=
+
+Steps 4 and 5 run only after step 3 succeeds. A failed merge leaves
+everything as it was.
+
+*PR-based projects* (version 2): "push and open PR" in place of step 3. The
+task stays =active= with =agent-pr= metadata and the =✓= glyph, and =s f= on
+a task with a merged PR does steps 4 and 5. Until then, PR projects keep using
+the agent's own =pr= skill, and the user marks the task =done= by hand.
+
+** Abandoning (=s k=)
+
+Choices: "back to todo" (the default) or "cancel task". If the branch has
+unmerged commits, the user also chooses between "keep branch" (the default,
+recorded in a note) and "delete branch". The shell is killed, the worktree
+removed and the metadata cleared, and a note records what happened.
+
+*Saving the conversation* is opt-in. It's off by default, controlled by
+=aven-agent-save-transcript-on-abandon=, and can be turned on for a single
+abandon with a =-t= switch in the confirmation step. When on, emacs-aven
+copies agent-shell's transcript file to =aven-agent-transcript-directory=
+(named after the branch) before killing the shell. The note then records
+that path. The transcript itself doesn't go into Aven: notes would be
+unwieldy at that size, and Aven attachments only accept images. Reading the
+transcript file relies on agent-shell's private
+=agent-shell--transcript-file=, so check it when upgrading agent-shell.
+
+** Status changed outside Emacs
+
+The aven CLI, the TUI or sync can change a task's status, so the status
+buffer reflects the state on every refresh:
+
+- =done= or =canceled= with a worktree still present: show =!= and offer
+  finish or clean-up on =s s=.
+- =agent-branch= set but the worktree is gone (removed with =workmux merge=
+  or by hand): treat it as finished, clear the stale metadata on the next
+  =s= interaction, and say so in the echo area.
+
+* Launching from the Aven TUI
+
+Because Aven's contract is "custom commands get task JSON", the same flow is
+available from =aven tui= through a small script:
+
+#+begin_src yaml
+tui:
+  commands:
+    - name: agent
+      description: Start or switch to an agent-shell on this task in Emacs
+      program: ~/.config/aven/commands/emacs-agent
+      keys: [z a]
+      target: focused
+      execution: wait
+      on_success: refresh
+#+end_src
+
+#+begin_src sh
+#!/usr/bin/env bash
+set -euo pipefail
+ref=$(jq -r '.selection.primary.ref')
+emacsclient -e "(aven-agent-start-or-switch \"$ref\")" >/dev/null
+#+end_src
+
+This requires a public, non-interactive =aven-agent-start-or-switch= that
+takes a ref and uses defaults instead of prompting (failing if the project has
+no path mapping). The plan should expose that function regardless of whether
+the TUI ever uses it. Ship the script as an example in the README, not as part
+of the package.
+
+* Edge cases
+
+- *Two agents on one task:* not allowed. =s s= switches to the existing
+  shell. Running several agents on one task (comparing attempts) is out of
+  scope.
+- *Same branch name for two tasks* (similar titles): when the slug is already
+  a branch, append =-2=. A task never reuses another task's worktree.
+- *agent-shell session can't be resumed* (the agent doesn't support
+  =session/load=, or the session expired): start fresh with a short re-brief,
+  "Resuming work on EA-XXXX; see the notes in `aven context` and the commits
+  on this branch", followed by the same context and instructions.
+- *Emacs restart:* every =●=/=◐= becomes =○=. Nothing is lost, because the
+  worktree, branch, metadata and session id are all on disk.
+- *Main checkout dirty during finish:* refuse; see Finishing step 3.
+- *The task moves to another project while an agent is working:* the metadata
+  travels with the task, and the worktree path is absolute, so nothing
+  breaks.
+- *A worktree created by =workmux add= by hand*, without metadata: not
+  detected. Adding an "Attach existing worktree…" action is cheap if it turns
+  out to be needed.
+
+* Relation to earlier work
+
+The =spawn-agent-shell= branch (=docs/features/spawn-agent-shell.md=) already
+contains a working implementation of the start path:
+
+- =aven-worktree.el= reimplements workmux's worktree setup in Emacs: config
+  merging, base branch, file operations and hooks. *Reuse it as is*, and add
+  =pre_merge= and =pre_remove= for Finish.
+- =aven-agent.el= resolves the project directory, builds the prompt and drives
+  agent-shell. *Reuse it, with these changes:*
+  - branch defaults to =ag--= plus a title slug (both editable), stored in
+    =agent-branch= metadata,
+    instead of the
+    lowercased ref stored in =workmux-handle=
+  - =agent-session= metadata for resuming sessions
+  - the prompt's completion paragraph
+  - =start-or-switch= as the public entry point
+- New in this plan: the transient's state-dependent actions, the agent-state
+  glyphs, the task buffer's Agent section, Finish, Abandon, and the TUI
+  command.
+
+* Delivery order
+
+1. Start, switch and resume, with metadata and the prompt (mostly a rebase of
+   the =spawn-agent-shell= branch with the changes above). The =s= transient.
+2. The Agent section in the task buffer, and the =○=/=●= glyphs.
+3. Finish (local merge) and Abandon, including the status transitions.
+4. =◐= glyph driven by agent-shell events; =✓= from =agent-state=, including
+   clearing the stale flag; the Agents filter.
+5. Mode without a worktree; the TUI custom command example.
+6. (Version 2) PR flow.
+
+* Open questions
+
+None at the moment.
