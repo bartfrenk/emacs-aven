@@ -53,6 +53,7 @@ keeping point on the same line and column when possible."
          (full (aven--task-full-json ref))
          (task (plist-get full :task))
          (description (aven--task-description ref))
+         (notes (plist-get full :notes))
          (line (line-number-at-pos))
          (column (current-column)))
     (let ((inhibit-read-only t))
@@ -66,10 +67,22 @@ keeping point on the same line and column when possible."
           (insert (propertize "No description." 'font-lock-face 'shadow) "\n")
         (aven--insert-text description)
         (insert "\n"))
-      (aven--insert-agent-section ref (plist-get full :metadata) (plist-get task :status)))
+      (aven--insert-agent-section ref (plist-get full :metadata) (plist-get task :status))
+      (aven--insert-notes-section notes))
     (goto-char (point-min))
     (forward-line (1- line))
     (move-to-column column)))
+
+(defun aven--insert-notes-section (notes)
+  "Insert the Notes section of the task buffer, from NOTES, a list of
+plists with :body and :created_at as returned under the :notes key
+of `aven--task-full-json', oldest first, or nothing when NOTES is empty."
+  (when notes
+    (insert "\n" (propertize "Notes" 'font-lock-face 'bold) "\n\n")
+    (dolist (note notes)
+      (insert (propertize (plist-get note :created_at) 'font-lock-face 'font-lock-comment-face) "\n")
+      (aven--insert-text (plist-get note :body))
+      (insert "\n"))))
 
 (defun aven--show-ref (ref)
   "Show REF in a dedicated Aven task buffer, with focus on its window."
