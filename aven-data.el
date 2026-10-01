@@ -127,6 +127,16 @@ with the task itself under :task and its metadata under :metadata."
           (push (match-string 1) paths))
         (nreverse paths)))))
 
+(defun aven--metadata-keys ()
+  "Keys of all metadata fields in the active workspace."
+  (with-temp-buffer
+    (when (zerop (call-process aven--executable nil t nil "metadata" "list" "--json"))
+      (let ((json-array-type 'list)
+            (json-object-type 'plist)
+            (json-key-type 'keyword))
+        (mapcar (lambda (field) (plist-get field :key))
+                (json-read-from-string (buffer-string)))))))
+
 (defun aven--label-names ()
   "Names of all existing labels in the active workspace."
   (with-temp-buffer

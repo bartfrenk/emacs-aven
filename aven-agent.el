@@ -119,11 +119,14 @@ never assigned in the workspace."
 
 (defun aven--agent-worktrees ()
   "Alist of (REF . WORKTREE) for every task linked to a worktree."
-  (mapcar (lambda (task)
-            (let ((ref (plist-get task :ref)))
-              (cons ref (plist-get (plist-get (aven--task-full-json ref) :metadata)
-                                   :agent-worktree))))
-          (aven--list-json "--has-metadata=agent-worktree")))
+  ;; aven rejects filtering on a key that no task in the workspace has
+  ;; ever had, so check that one has first.
+  (when (member "agent-worktree" (aven--metadata-keys))
+    (mapcar (lambda (task)
+              (let ((ref (plist-get task :ref)))
+                (cons ref (plist-get (plist-get (aven--task-full-json ref) :metadata)
+                                     :agent-worktree))))
+            (aven--list-json "--has-metadata=agent-worktree"))))
 
 (defun aven--agent-glyph (worktree)
   "Glyph for an agent in WORKTREE: ● when an agent-shell is running
