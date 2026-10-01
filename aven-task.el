@@ -75,7 +75,7 @@ keeping point on the same line and column when possible."
     "g" #'aven-task-refresh
     "e" #'aven/edit-field
     "n" #'aven/note
-    "D" #'aven/delete
+    "d" #'aven/delete
     "?" #'aven/dispatch))
 
 (provide 'aven-task)

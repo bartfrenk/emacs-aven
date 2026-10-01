@@ -194,7 +194,7 @@ when possible."
     "a" #'aven/add
     "e" #'aven/edit-field
     "n" #'aven/note
-    "D" #'aven/delete
+    "d" #'aven/delete
     "f" #'aven/status-filter
     "?" #'aven/dispatch))
 

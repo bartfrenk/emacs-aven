@@ -285,7 +285,7 @@ Aven only soft-deletes it: `aven restore' recovers it."
     ("a" "Add"         aven/add)
     ("e" "Edit field"  aven/edit-field)
     ("n" "Note"        aven/note)
-    ("D" "Delete"      aven/delete)]
+    ("d" "Delete"      aven/delete)]
    ["Workspace"
     ("g" "Sync"   aven/sync)
     ("y" "Doctor" aven/doctor)]])
