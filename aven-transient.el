@@ -6,8 +6,8 @@
 
 ;;; Commentary:
 
-;; All transient prefixes (list/status-filter/search/show/context/
-;; add/dispatch) and the quick single-field edit commands.
+;; All transient prefixes (status-filter/context/add/dispatch) and
+;; the quick single-field edit commands.
 
 ;;; Code:
 
@@ -17,29 +17,6 @@
 (require 'aven-process)
 (require 'aven-description)
 (require 'aven-status)
-
-(transient-define-prefix aven/list ()
-  "List Aven tasks."
-  ["Filters"
-   ("-r" "Ready only"        "--ready")
-   ("-o" "Open (nonterminal)" "--open")
-   ("-b" "Blocked"           "--blocked")
-   ("-e" "Epics"             "--epics")
-   ("-u" "Upcoming"          "--upcoming")
-   ("-d" "Overdue"           "--overdue")
-   ("-a" "Include deleted"   "--all")]
-  ["Arguments"
-   ("-p" "Project"  "--project=")
-   ("-s" "Status"   "--status=")
-   ("-i" "Priority" "--priority=")
-   ("-l" "Label"    "--label=")
-   ("-n" "Limit"    "--limit=")]
-  ["Action"
-   ("RET" "List tasks" aven--list-tasks)])
-
-(defun aven--list-tasks (&optional args)
-  (interactive (list (transient-args 'aven/list)))
-  (apply #'aven--run "list" args))
 
 (transient-define-prefix aven/status-filter ()
   "Filter the tasks shown in the Aven status buffer."
@@ -72,32 +49,6 @@
   (interactive)
   (setq aven-status-filter nil)
   (aven-status-refresh))
-
-(transient-define-prefix aven/search ()
-  "Search Aven tasks."
-  ["Arguments"
-   ("-p" "Project"        "--project=")
-   ("-n" "Limit"          "--limit=")
-   ("-a" "Include deleted" "--all")]
-  ["Action"
-   ("RET" "Search" aven--search-tasks)])
-
-(defun aven--search-tasks (&optional args)
-  (interactive (list (transient-args 'aven/search)))
-  (let ((query (read-string "Search: ")))
-    (apply #'aven--run "search" (append args (split-string query)))))
-
-(transient-define-prefix aven/show ()
-  "Show an Aven task."
-  ["Arguments"
-   ("-f" "Full detail" "--full")]
-  ["Action"
-   ("RET" "Show task" aven--show-task)])
-
-(defun aven--show-task (&optional args)
-  (interactive (list (transient-args 'aven/show)))
-  (let ((ref (aven--read-ref "Show task: ")))
-    (apply #'aven--run "show" (append args (list ref)))))
 
 (defun aven/context ()
   "Show a context snapshot for a task."
@@ -277,9 +228,6 @@ Aven only soft-deletes it: `aven restore' recovers it."
   "Transient interface to the Aven CLI."
   ["Aven"
    ["Query"
-    ("L" "List"    aven/list)
-    ("s" "Search"  aven/search)
-    ("w" "Show"    aven/show)
     ("c" "Context" aven/context)
     ("f" "Filter"  aven/status-filter
      :if (lambda () (derived-mode-p 'aven-status-mode)))]

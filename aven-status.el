@@ -23,9 +23,6 @@
 ;; Defined in aven-transient.el, loaded before this module is used
 ;; interactively; declared here only to keep the byte-compiler quiet
 ;; about the forward references from the evil keymap below.
-(declare-function aven/list "aven-transient")
-(declare-function aven/search "aven-transient")
-(declare-function aven/show "aven-transient")
 (declare-function aven/context "aven-transient")
 (declare-function aven/add "aven-transient")
 (declare-function aven/edit-field "aven-transient")
@@ -187,9 +184,6 @@ when possible."
     "j" #'evil-next-visual-line
     "k" #'evil-previous-visual-line
     "g" #'aven-status-refresh
-    "L" #'aven/list
-    "s" #'aven/search
-    "w" #'aven/show
     "c" #'aven/context
     "a" #'aven/add
     "e" #'aven/edit-field
