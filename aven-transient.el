@@ -6,8 +6,8 @@
 
 ;;; Commentary:
 
-;; All transient prefixes (status-filter/context/add/dispatch) and
-;; the quick single-field edit commands.
+;; All transient prefixes (status-filter/context/add/agent/dispatch)
+;; and the quick single-field edit commands.
 
 ;;; Code:
 
@@ -17,6 +17,7 @@
 (require 'aven-process)
 (require 'aven-description)
 (require 'aven-status)
+(require 'aven-agent)
 
 (transient-define-prefix aven/status-filter ()
   "Filter the tasks shown in the Aven status buffer."
@@ -216,6 +217,77 @@ Aven only soft-deletes it: `aven restore' recovers it."
         (kill-buffer buf))
       (aven--run-quietly "delete" ref))))
 
+;;; Agent
+
+(declare-function magit-status "magit-status")
+
+(defvar aven--agent-menu-state nil
+  "`aven--agent-state' of the task the agent menu was opened for, plus
+its ref under :ref.")
+
+(defun aven/agent ()
+  "Start, switch to or resume an agent on the task at point."
+  (interactive)
+  (let ((ref (or (aven--ref-at-point) (aven--read-ref "Agent for: "))))
+    (setq aven--agent-menu-state (plist-put (aven--agent-state ref) :ref ref))
+    (transient-setup 'aven--agent-menu)))
+
+(defun aven--agent-menu-worktree ()
+  (let ((worktree (plist-get aven--agent-menu-state :worktree)))
+    (and worktree (file-directory-p worktree) worktree)))
+
+(defun aven--agent-menu-heading ()
+  (let ((task (plist-get aven--agent-menu-state :task)))
+    (format "Agent: %s %s"
+            (propertize (plist-get aven--agent-menu-state :ref) 'face 'aven-ref-face)
+            (plist-get task :title))))
+
+(defun aven--agent-menu-start-description ()
+  (cond
+   ((plist-get aven--agent-menu-state :shell) "Switch to agent")
+   ((aven--agent-menu-worktree) "Resume agent")
+   (t "Start agent")))
+
+(transient-define-prefix aven--agent-menu ()
+  "Start, switch to or resume an agent on an Aven task."
+  [:description aven--agent-menu-heading
+   ["Options"
+    ("-b" "Base branch" "--base="
+     :if-not aven--agent-menu-worktree)
+    ("-c" "Agent config" "--config="
+     :if-not (lambda () (plist-get aven--agent-menu-state :shell))
+     :reader (lambda (prompt initial history)
+               (completing-read prompt (aven--agent-config-names) nil t initial history)))]
+   ["Actions"
+    ("s" aven--agent-menu-start :description aven--agent-menu-start-description)
+    ("e" "Start, editing the first message" aven--agent-menu-start-edit
+     :if-not aven--agent-menu-worktree)
+    ("d" "Worktree in dired" aven--agent-menu-dired :if aven--agent-menu-worktree)
+    ("m" "Worktree in magit" aven--agent-menu-magit :if aven--agent-menu-worktree)]])
+
+(defun aven--agent-menu-run (args edit)
+  (aven-agent-start-or-switch (plist-get aven--agent-menu-state :ref)
+                              :base (transient-arg-value "--base=" args)
+                              :config (transient-arg-value "--config=" args)
+                              :edit edit
+                              :read-branch t))
+
+(defun aven--agent-menu-start (&optional args)
+  (interactive (list (transient-args 'aven--agent-menu)))
+  (aven--agent-menu-run args nil))
+
+(defun aven--agent-menu-start-edit (&optional args)
+  (interactive (list (transient-args 'aven--agent-menu)))
+  (aven--agent-menu-run args t))
+
+(defun aven--agent-menu-dired ()
+  (interactive)
+  (dired (aven--agent-menu-worktree)))
+
+(defun aven--agent-menu-magit ()
+  (interactive)
+  (magit-status (aven--agent-menu-worktree)))
+
 (defun aven/sync ()
   "Sync Aven with its remote server."
   (interactive)
@@ -238,6 +310,8 @@ Aven only soft-deletes it: `aven restore' recovers it."
     ("e" "Edit field"  aven/edit-field)
     ("n" "Note"        aven/note)
     ("d" "Delete"      aven/delete)]
+   ["Agent"
+    ("s" "Agent"       aven/agent)]
    ["Workspace"
     ("g" "Sync"   aven/sync)
     ("y" "Doctor" aven/doctor)]])

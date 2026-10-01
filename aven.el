@@ -1,7 +1,7 @@
 ;;; aven.el --- Transient interface to the Aven CLI task manager -*- lexical-binding: t; -*-
 
 ;; Author: Bart Frenk <bart.frenk@gmail.com>
-;; Package-Requires: ((emacs "27.1") (transient "0.4") (magit-section "3.0"))
+;; Package-Requires: ((emacs "27.1") (transient "0.4") (magit-section "3.0") (yaml "1.2.4") (agent-shell "0.74.3"))
 ;; Keywords: tools
 
 ;;; Commentary:
@@ -19,10 +19,11 @@
 ;;
 ;; The implementation is split across several `aven-*' files, loaded
 ;; below: aven-core (shared primitives), aven-data (CLI data access),
-;; aven-process (running commands and the output buffer), aven-task
-;; (the per-task buffer), aven-status (the status buffer),
-;; aven-description (description editing), and aven-transient (all
-;; transient commands).
+;; aven-process (running commands and the output buffer), aven-worktree
+;; (git worktrees set up per workmux's config), aven-agent (agent-shell
+;; on a task, in a worktree), aven-task (the per-task buffer),
+;; aven-status (the status buffer), aven-description (description
+;; editing), and aven-transient (all transient commands).
 
 ;;; Code:
 
@@ -35,6 +36,8 @@
 (require 'aven-core)
 (require 'aven-data)
 (require 'aven-process)
+(require 'aven-worktree)
+(require 'aven-agent)
 (require 'aven-task)
 (require 'aven-status)
 (require 'aven-description)

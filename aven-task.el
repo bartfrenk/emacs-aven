@@ -25,6 +25,7 @@
 (declare-function aven/edit-field "aven-transient")
 (declare-function aven/note "aven-transient")
 (declare-function aven/delete "aven-transient")
+(declare-function aven/agent "aven-transient")
 (declare-function aven/dispatch "aven-transient")
 
 (defvar-local aven-task--ref nil
@@ -35,6 +36,12 @@
 
 (with-eval-after-load 'evil
   (evil-set-initial-state 'aven-task-mode 'motion))
+
+;; evil-snipe's local map takes precedence over the task buffer's own
+;; evil bindings, so it would shadow s (agent).
+(defvar evil-snipe-disabled-modes)
+(with-eval-after-load 'evil-snipe
+  (add-to-list 'evil-snipe-disabled-modes 'aven-task-mode))
 
 (defun aven-task-refresh ()
   "Rebuild this Aven task buffer from the current state of its task,
@@ -76,6 +83,7 @@ keeping point on the same line and column when possible."
     "e" #'aven/edit-field
     "n" #'aven/note
     "d" #'aven/delete
+    "s" #'aven/agent
     "?" #'aven/dispatch))
 
 (provide 'aven-task)

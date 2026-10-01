@@ -25,6 +25,18 @@
             (json-read-from-string (buffer-string)))
         (error "aven: %s" (string-trim (buffer-string)))))))
 
+(defun aven--task-full-json (ref)
+  "Full JSON detail for REF including metadata and notes, as a plist
+with the task itself under :task and its metadata under :metadata."
+  (with-temp-buffer
+    (let ((exit-code (call-process aven--executable nil t nil "show" ref "--full" "--json")))
+      (if (zerop exit-code)
+          (let ((json-array-type 'list)
+                (json-object-type 'plist)
+                (json-key-type 'keyword))
+            (json-read-from-string (buffer-string)))
+        (error "aven: %s" (string-trim (buffer-string)))))))
+
 (defun aven--task-properties (task)
   "Alist of label/value pairs describing all of TASK's fields."
   (let ((priority  (plist-get task :priority))
@@ -103,6 +115,17 @@
             (json-key-type 'keyword))
         (mapcar (lambda (project) (plist-get project :key))
                 (json-read-from-string (buffer-string)))))))
+
+(defun aven--project-paths (project)
+  "Directories associated with PROJECT through `aven project path add'."
+  (with-temp-buffer
+    (when (zerop (call-process aven--executable nil t nil
+                               "project" "path" "list" project))
+      (let (paths)
+        (goto-char (point-min))
+        (while (re-search-forward "path=\"\\([^\"]*\\)\"" nil t)
+          (push (match-string 1) paths))
+        (nreverse paths)))))
 
 (defun aven--label-names ()
   "Names of all existing labels in the active workspace."

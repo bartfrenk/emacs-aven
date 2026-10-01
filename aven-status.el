@@ -29,6 +29,7 @@
 (declare-function aven/note "aven-transient")
 (declare-function aven/delete "aven-transient")
 (declare-function aven/status-filter "aven-transient")
+(declare-function aven/agent "aven-transient")
 (declare-function aven/dispatch "aven-transient")
 
 ;; Defined in aven-task.el.
@@ -109,7 +110,7 @@ When HIDE is non-nil, the section starts folded."
   (evil-set-initial-state 'aven-status-mode 'motion))
 
 ;; evil-snipe's local map takes precedence over the status buffer's
-;; own evil bindings, so it would shadow f (filter).
+;; own evil bindings, so it would shadow f (filter) and s (agent).
 (defvar evil-snipe-disabled-modes)
 (with-eval-after-load 'evil-snipe
   (add-to-list 'evil-snipe-disabled-modes 'aven-status-mode))
@@ -190,6 +191,7 @@ when possible."
     "n" #'aven/note
     "d" #'aven/delete
     "f" #'aven/status-filter
+    "s" #'aven/agent
     "?" #'aven/dispatch))
 
 (provide 'aven-status)

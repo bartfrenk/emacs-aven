@@ -105,7 +105,7 @@ The rest of the transient:
   -w  Worktree        [on]            s  Start / switch / resume
   -b  Base branch     (main)          e  Start, edit prompt before sending
   -c  Agent config    (Claude Code)   f  Finish (merge & done)…
-  -n  Branch name     (slug)          k  Abandon…
+                                      k  Abandon…
                                       d  Open worktree in dired
                                       m  Magit status of worktree
 #+end_example
@@ -139,6 +139,8 @@ way the dispatch menu hides the status filter.
 4. *Record the link on the task* as metadata:
    - =agent-branch= :: the branch name; this is the authoritative link
    - =agent-worktree= :: the absolute worktree path
+   - =agent-base= :: the branch the worktree was created from, which
+     Finish merges back into
    - =agent-session= :: the agent-shell session id, written once the session
      exists, so the session can be resumed after Emacs restarts
    - =agent-state= :: set to =review= by the agent when it considers the
